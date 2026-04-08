@@ -1,0 +1,88 @@
+#compdef lmgrep
+
+_lmgrep() {
+  local -a commands
+  commands=(
+    'index:Index the current directory for semantic search'
+    'search:Search the codebase using natural language'
+    'status:Show index stats and check embedding connectivity'
+    'repair:Detect and fix index inconsistencies'
+    'serve:Watch the current directory and re-index on changes'
+    'init:Detect your embedding setup and create config'
+    'config:Open the global config file in your editor'
+    'compact:Compact the index to reclaim disk space'
+    'prune:Delete the index database for the current directory'
+    'import:Import chunks and file hashes from another lmgrep database'
+    'completions:Output shell completions'
+  )
+
+  _arguments -C \
+    '(-h --help)'{-h,--help}'[Show help]' \
+    '(-V --version)'{-V,--version}'[Show version]' \
+    '1:command:->command' \
+    '*::arg:->args'
+
+  case "$state" in
+    command)
+      _describe 'command' commands
+      ;;
+    args)
+      case "$words[1]" in
+        index)
+          _arguments \
+            '(-r --reset)'{-r,--reset}'[Reset and rebuild the entire index]' \
+            '(-v --verbose)'{-v,--verbose}'[Show file-by-file progress]' \
+            '(-s --since)'{-s,--since}'[Only consider files modified within duration]:duration' \
+            '(-f --force)'{-f,--force}'[Force re-embed even if file hash unchanged]' \
+            '(-d --dry)'{-d,--dry}'[Show what would be indexed without actually doing it]'
+          ;;
+        search)
+          _arguments \
+            '1:query' \
+            '(-m --limit)'{-m,--limit}'[Max results]:number' \
+            '--scores[Show relevance scores]' \
+            '--compact[Show file paths only]' \
+            '--json[Output results as JSON]' \
+            '--min-score[Minimum score threshold]:score' \
+            '--file-prefix[Only search files matching this path prefix]:prefix:_files -/' \
+            '--not[Exclude results similar to this query]:query' \
+            '--type[Only return chunks of these AST types]:types' \
+            '--language[Only return chunks from files with these extensions]:extensions' \
+            '--project[Search a different project index]:path:_files -/' \
+            '--across[Search multiple project indexes]:paths'
+          ;;
+        status)
+          _arguments \
+            '(-c --changes)'{-c,--changes}'[Scan for changed files since last index]' \
+            '--json[Output status as JSON]'
+          ;;
+        repair)
+          _arguments \
+            '(-d --dry)'{-d,--dry}'[Show what would be repaired without making changes]' \
+            '--json[Output repair results as JSON]'
+          ;;
+        init)
+          _arguments \
+            '--force[Overwrite existing config]' \
+            '--local[Write a project-local .lmgrep.yml instead of the global config]'
+          ;;
+        prune)
+          _arguments \
+            '--force[Skip confirmation]'
+          ;;
+        import)
+          _arguments \
+            '1:database path:_files' \
+            '--reset[Reset the current index before importing]'
+          ;;
+        completions)
+          _arguments \
+            '1:shell:(zsh)' \
+            '--install[Install to site-functions]'
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_lmgrep "$@"

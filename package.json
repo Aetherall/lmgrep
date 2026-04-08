@@ -1,0 +1,48 @@
+{
+  "name": "lmgrep",
+  "version": "0.1.0",
+  "description": "Semantic code search with any AI embedding provider",
+  "type": "module",
+  "bin": {
+    "lmgrep": "./dist/cli.js",
+    "lmgrep-mcp": "./dist/mcp.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/cli.js",
+    "check": "biome check --write .",
+    "lint": "biome lint ."
+  },
+  "keywords": [
+    "semantic-search",
+    "code-search",
+    "embeddings",
+    "tree-sitter",
+    "ai"
+  ],
+  "author": "",
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@10.28.0",
+  "dependencies": {
+    "@lancedb/lancedb": "^0.27.2",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "ai": "^6.0.149",
+    "apache-arrow": "^21.1.0",
+    "cli-progress": "^3.12.0",
+    "commander": "^14.0.3",
+    "glob": "^13.0.6",
+    "ignore": "^7.0.5",
+    "tree-sitter-wasms": "^0.1.13",
+    "web-tree-sitter": "^0.20.8",
+    "yaml": "^2.8.3",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@ai-sdk/openai": "^3.0.51",
+    "@biomejs/biome": "^2.4.10",
+    "@types/cli-progress": "^3.11.6",
+    "@types/node": "^25.5.2",
+    "typescript": "^6.0.2"
+  }
+}

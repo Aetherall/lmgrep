@@ -1,0 +1,4 @@
+model: lmstudio:text-embedding-nomic-embed-text-v1.5
+provider: "@ai-sdk/openai-compatible"
+baseURL: http://localhost:1234/v1
+batchSize: 10
