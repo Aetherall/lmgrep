@@ -635,8 +635,22 @@ export class Store {
 
 		if (sourceTables.includes(CHUNKS_TABLE)) {
 			const sourceChunks = await sourceConn.openTable(CHUNKS_TABLE);
-			const rows = await sourceChunks.query().toArray();
-			if (rows.length > 0) {
+			const rawChunkRows = await sourceChunks.query().toArray();
+			if (rawChunkRows.length > 0) {
+				// Convert Arrow typed arrays to plain JS objects so LanceDB can
+				// infer the schema when creating a new table.
+				const rows = rawChunkRows.map((r) => ({
+					id: r.id,
+					filePath: r.filePath,
+					startLine: r.startLine,
+					endLine: r.endLine,
+					type: r.type,
+					name: r.name,
+					content: r.content,
+					context: r.context,
+					hash: r.hash,
+					vector: Array.from(r.vector as Iterable<number>),
+				}));
 				const conn = await this.connection();
 				const destTables = await conn.tableNames();
 				if (destTables.includes(CHUNKS_TABLE)) {
