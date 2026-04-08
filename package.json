@@ -23,6 +23,15 @@
   ],
   "author": "",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Aetherall/lmgrep.git"
+  },
+  "files": [
+    "dist",
+    "completions",
+    "README.md"
+  ],
   "packageManager": "pnpm@10.28.0",
   "dependencies": {
     "@lancedb/lancedb": "^0.27.2",
