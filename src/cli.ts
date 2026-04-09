@@ -628,7 +628,13 @@ program
 		});
 }
 
-program.parse();
+// Auto-detect MCP mode: no args + both stdin and stdout are piped (stdio transport)
+const userArgs = process.argv.slice(2);
+if (userArgs.length === 0 && !process.stdin.isTTY && !process.stdout.isTTY) {
+	await import("./mcp.js");
+} else {
+	program.parse();
+}
 
 // --- Zsh helpers ---
 

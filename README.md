@@ -98,18 +98,19 @@ lmgrep search "error handling" --file-prefix src/lib --language .ts
 
 ## MCP server
 
-lmgrep includes an MCP server for use with AI coding assistants. Add it to your tool's MCP configuration:
+lmgrep includes an MCP server for use with AI coding assistants. When launched with no arguments over piped stdio (as MCP clients do), it automatically starts in MCP mode. Just add it to your tool's MCP configuration:
 
 ```json
 {
   "mcpServers": {
     "lmgrep": {
-      "command": "lmgrep",
-      "args": ["mcp"]
+      "command": "lmgrep"
     }
   }
 }
 ```
+
+You can also start it explicitly with `lmgrep mcp`.
 
 The MCP server exposes a `search` tool and a `list_other_indexed_projects` tool. It automatically watches for file changes and keeps the index up to date.
 
