@@ -36,4 +36,4 @@ jobs:
           echo "Latest: $latest -> Next: $next"
           npm pkg set version="$next"
 
-          pnpm publish --no-git-checks --provenance
+          pnpm publish --no-git-checks
