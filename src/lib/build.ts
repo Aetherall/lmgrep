@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import {
 	type Embedder,
 	ResilientEmbedder,
@@ -14,6 +15,20 @@ import type {
 	BuildOptions,
 } from "./types.js";
 import { consoleLogger } from "./types.js";
+
+function gitCmd(cwd: string, ...args: string[]): string | undefined {
+	try {
+		return execSync(`git ${args.join(" ")}`, {
+			cwd,
+			stdio: ["ignore", "pipe", "ignore"],
+			timeout: 5000,
+		})
+			.toString()
+			.trim();
+	} catch {
+		return undefined;
+	}
+}
 
 function parseDuration(s: string): number {
 	const match = s.match(/^(\d+)\s*(s|m|h|d)$/);
@@ -45,6 +60,37 @@ export async function build(
 	if (opts.reset) {
 		log("Resetting index...");
 		await store.reset();
+	}
+
+	// 0. Bootstrap new branch manifest from merge base
+	if (!opts.reset) {
+		const existingHashes = await store.getFileHashes();
+		if (existingHashes.size === 0) {
+			const storedBranches = await store.getStoredBranches();
+			if (storedBranches.length > 0) {
+				// Find the best source branch via merge-base
+				let bestBranch: string | undefined;
+				let bestScore = -1;
+				for (const candidate of storedBranches) {
+					const mergeBase = gitCmd(cwd, "merge-base", "HEAD", candidate);
+					if (!mergeBase) continue;
+					// Count commits between merge-base and HEAD — fewer = closer
+					const ahead = gitCmd(cwd, "rev-list", "--count", `${mergeBase}..HEAD`);
+					const distance = ahead ? Number.parseInt(ahead, 10) : Infinity;
+					if (distance < Infinity && (bestBranch === undefined || distance < bestScore)) {
+						bestBranch = candidate;
+						bestScore = distance;
+					}
+				}
+
+				if (bestBranch) {
+					const copied = await store.copyBranchManifest(bestBranch);
+					if (copied > 0) {
+						log(`Bootstrapped from "${bestBranch}" manifest (${copied} files). Diffing changes...`);
+					}
+				}
+			}
+		}
 	}
 
 	// 1. Scan
@@ -285,5 +331,29 @@ export async function build(
 		dimensions: embeddingDimensions,
 	});
 
+	// Sweep stale branch manifests for branches that no longer exist in git
+	await sweepStaleBranches(cwd, store, logger);
+
 	return { succeeded, failed };
+}
+
+async function sweepStaleBranches(
+	cwd: string,
+	store: Store,
+	logger: Logger,
+): Promise<void> {
+	const gitBranchOutput = gitCmd(cwd, "branch", "--list", "--format=%(refname:short)");
+	if (!gitBranchOutput) return;
+
+	const gitBranches = new Set(gitBranchOutput.split("\n").filter(Boolean));
+	// Always keep _default (non-git projects)
+	gitBranches.add("_default");
+
+	const storedBranches = await store.getStoredBranches();
+	for (const branch of storedBranches) {
+		if (!gitBranches.has(branch)) {
+			await store.deleteBranchManifest(branch);
+			logger.info(`Swept stale manifest for deleted branch "${branch}"`);
+		}
+	}
 }

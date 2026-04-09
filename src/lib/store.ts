@@ -847,6 +847,51 @@ export class Store {
 		return { chunks, files };
 	}
 
+	/**
+	 * Return all distinct branch names present in the files table.
+	 */
+	async getStoredBranches(): Promise<string[]> {
+		const t = await this.openFiles();
+		if (!t) return [];
+		const rows = await t.query().select(["branch"]).toArray();
+		return [...new Set(rows.map((r) => r.branch as string))];
+	}
+
+	/**
+	 * Delete all file manifest rows for a given branch.
+	 */
+	async deleteBranchManifest(branch: string): Promise<void> {
+		const t = await this.openFiles();
+		if (!t) return;
+		const escaped = branch.replace(/'/g, "''");
+		await t.delete(`branch = '${escaped}'`);
+	}
+
+	/**
+	 * Copy another branch's file manifest to this store's branch.
+	 * Used to bootstrap a new branch from a merge base.
+	 */
+	async copyBranchManifest(sourceBranch: string): Promise<number> {
+		const t = await this.openFiles();
+		if (!t) return 0;
+		const escaped = sourceBranch.replace(/'/g, "''");
+		const rows = await t
+			.query()
+			.where(`branch = '${escaped}'`)
+			.select(["filePath", "fileHash"])
+			.toArray();
+		if (rows.length === 0) return 0;
+
+		const records = rows.map((r) => ({
+			filePath: r.filePath as string,
+			fileHash: r.fileHash as string,
+			branch: this.branch,
+		}));
+
+		await t.add(records);
+		return records.length;
+	}
+
 	async close(): Promise<void> {
 		this.chunksTable = undefined;
 		this.filesTable = undefined;
