@@ -157,6 +157,7 @@ export async function createIndex(
 					limit,
 					target.filePrefix,
 					opts.type,
+					!target.projectRoot, // scope to branch for local project only
 				);
 
 				// Tag results from foreign projects with their root

@@ -502,18 +502,48 @@ export class Store {
 		}
 	}
 
+	private branchFilesCache: Set<string> | undefined;
+
+	/**
+	 * Get the set of file paths indexed on the current branch (cached).
+	 */
+	async getBranchFiles(): Promise<Set<string> | undefined> {
+		if (this.branchFilesCache) return this.branchFilesCache;
+		const t = await this.openFiles();
+		if (!t) return undefined;
+		const escaped = this.branch.replace(/'/g, "''");
+		const rows = await t
+			.query()
+			.where(`branch = '${escaped}'`)
+			.select(["filePath"])
+			.toArray();
+		this.branchFilesCache = new Set(rows.map((r) => r.filePath as string));
+		return this.branchFilesCache;
+	}
+
+	/** Invalidate the branch files cache (call after index/import). */
+	invalidateBranchFilesCache(): void {
+		this.branchFilesCache = undefined;
+	}
+
 	async search(
 		queryVector: number[],
 		limit = 25,
 		filePrefix?: string,
 		typeFilter?: string[],
+		/** Pass false to skip branch scoping (e.g. for cross-project search). */
+		scopeToBranch = true,
 	): Promise<SearchResult[]> {
 		const t = await this.openChunks();
 		if (!t) {
 			throw new Error("No index found. Run `lmgrep index` first.");
 		}
 
-		let query = t.search(queryVector).limit(limit);
+		const branchFiles = scopeToBranch ? await this.getBranchFiles() : undefined;
+
+		// Over-fetch when branch-filtering since some results will be discarded
+		const fetchLimit = branchFiles ? limit * 3 : limit;
+		let query = t.search(queryVector).limit(fetchLimit);
 
 		const conditions: string[] = [];
 		if (filePrefix) {
@@ -533,7 +563,7 @@ export class Store {
 
 		const results = await query.toArray();
 
-		return results.map((r) => ({
+		let mapped = results.map((r) => ({
 			filePath: r.filePath as string,
 			startLine: r.startLine as number,
 			endLine: r.endLine as number,
@@ -543,6 +573,12 @@ export class Store {
 			context: r.context as string,
 			score: r._distance != null ? 1 - (r._distance as number) : 0,
 		}));
+
+		if (branchFiles) {
+			mapped = mapped.filter((r) => branchFiles.has(r.filePath));
+		}
+
+		return mapped.slice(0, limit);
 	}
 
 	async getIndexedFiles(): Promise<Map<string, string[]>> {
