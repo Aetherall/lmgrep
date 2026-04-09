@@ -23,6 +23,7 @@ import {
 	isDbLocked,
 	readProjectMetadata,
 	extractModelFamily,
+	discoverRunningProcesses,
 } from "./lib/store.js";
 
 const program = new Command();
@@ -160,8 +161,10 @@ program
 		const index = await createIndex({ cwd });
 		const info = await index.status();
 
+		const processes = discoverRunningProcesses();
+
 		if (opts.json) {
-			const output: Record<string, unknown> = { ...info };
+			const output: Record<string, unknown> = { ...info, processes };
 			if (opts.changes) {
 				const projectRoot = info.projectRoot;
 				const projectStore = Store.forProject(projectRoot);
@@ -216,6 +219,22 @@ program
 			console.log(`  OK (${info.embeddingLatencyMs}ms)`);
 		} else {
 			console.log(`  FAILED`);
+		}
+
+		if (processes.length > 0) {
+			console.log(`\nRunning processes:`);
+			for (const proc of processes) {
+				const kindLabel =
+					proc.kind === "mcp" ? "MCP server" :
+					proc.kind === "serve" ? "serve" :
+					"CLI";
+				const project = proc.projectRoot ?? "unknown";
+				const watching = proc.watching ? ", watching" : "";
+				console.log(`  ${kindLabel} (pid ${proc.pid})${watching}`);
+				console.log(`    index: ${project}`);
+			}
+		} else {
+			console.log(`\nNo running lmgrep processes.`);
 		}
 
 		if (opts.changes) {
@@ -298,6 +317,13 @@ program
 		const cwd = process.cwd();
 		const index = await createIndex({ cwd });
 		await index.watch();
+	});
+
+program
+	.command("mcp")
+	.description("Start the MCP server (stdio transport)")
+	.action(async () => {
+		await import("./mcp.js");
 	});
 
 program

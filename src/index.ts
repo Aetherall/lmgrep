@@ -59,8 +59,9 @@ export {
 	acquireDbLock,
 	releaseDbLock,
 	isDbLocked,
+	discoverRunningProcesses,
 } from "./lib/store.js";
-export type { ProjectMetadata } from "./lib/store.js";
+export type { ProjectMetadata, RunningProcess } from "./lib/store.js";
 export { startWatcher } from "./lib/serve.js";
 export { loadConfig, getConfigDir, getGlobalConfigPath } from "./lib/config.js";
 

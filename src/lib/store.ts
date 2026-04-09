@@ -305,6 +305,89 @@ export function isDbLocked(cwd: string): boolean {
 	}
 }
 
+// --- Running process discovery ---
+
+export interface RunningProcess {
+	pid: number;
+	/** Process title from /proc/<pid>/comm (e.g. "lmgrep-mcp", "lmgrep") */
+	processName: string;
+	/** Full command line */
+	cmdline: string;
+	/** Kind of process: "mcp", "serve", or "cli" */
+	kind: "mcp" | "serve" | "cli";
+	/** Project root from the index metadata */
+	projectRoot?: string;
+	/** Whether this process is maintaining (watching) the index */
+	watching: boolean;
+}
+
+function getProcessInfo(pid: number): { name: string; cmdline: string } | undefined {
+	try {
+		const name = readFileSync(`/proc/${pid}/comm`, "utf-8").trim();
+		const cmdline = readFileSync(`/proc/${pid}/cmdline`, "utf-8")
+			.replace(/\0/g, " ")
+			.trim();
+		return { name, cmdline };
+	} catch {
+		return undefined;
+	}
+}
+
+function classifyProcess(info: { name: string; cmdline: string }): "mcp" | "serve" | "cli" {
+	if (info.name === "lmgrep-mcp" || info.cmdline.includes("mcp")) return "mcp";
+	if (info.cmdline.includes("serve")) return "serve";
+	return "cli";
+}
+
+/**
+ * Scan all lock files to find running lmgrep processes,
+ * which indexes they hold, and whether they are watching for changes.
+ */
+export function discoverRunningProcesses(): RunningProcess[] {
+	const baseDir = join(homedir(), ".local", "state", "lmgrep");
+	if (!existsSync(baseDir)) return [];
+
+	const results: RunningProcess[] = [];
+	const seen = new Set<number>();
+
+	for (const entry of readdirSync(baseDir)) {
+		if (!entry.endsWith(".lock")) continue;
+
+		const lockPath = join(baseDir, entry);
+		let pid: number;
+		try {
+			pid = Number.parseInt(readFileSync(lockPath, "utf-8").trim(), 10);
+		} catch {
+			continue;
+		}
+
+		if (!isProcessAlive(pid) || seen.has(pid)) continue;
+		seen.add(pid);
+
+		const info = getProcessInfo(pid);
+		if (!info) continue;
+
+		const kind = classifyProcess(info);
+
+		// Resolve which project this lock belongs to
+		const dbDir = entry.slice(0, -".lock".length);
+		const dbPath = join(baseDir, dbDir);
+		const metadata = readProjectMetadata(dbPath);
+
+		results.push({
+			pid,
+			processName: info.name,
+			cmdline: info.cmdline,
+			kind,
+			projectRoot: metadata?.root,
+			// MCP and serve processes watch; plain CLI invocations don't
+			watching: kind === "mcp" || kind === "serve",
+		});
+	}
+
+	return results;
+}
+
 export class Store {
 	private db: Connection | undefined;
 	private chunksTable: Table | undefined;
