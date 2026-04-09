@@ -8,7 +8,7 @@ lmgrep uses [Tree-sitter](https://tree-sitter.github.io/tree-sitter/) to parse s
 
 - **Any embedding provider** — works with Ollama, OpenAI, Google, or any provider supported by the [Vercel AI SDK](https://sdk.vercel.ai/)
 - **Tree-sitter chunking** — splits code at AST boundaries so search results are complete, meaningful units
-- **MCP server** — ships with an MCP server (`lmgrep-mcp`) for integration with Claude Code, Cursor, and other AI tools
+- **MCP server** — built-in MCP server (`lmgrep mcp`) for integration with Claude Code, Cursor, and other AI tools
 - **File watching** — `lmgrep serve` watches for changes and incrementally re-indexes
 - **Cross-project search** — search across multiple indexed projects
 - **Git-aware** — respects `.gitignore`, deduplicates across worktrees sharing the same remote
@@ -60,8 +60,9 @@ lmgrep search "error handling" --file-prefix src/lib --language .ts
 |---|---|
 | `lmgrep index` | Index the current directory |
 | `lmgrep search <query>` | Search using natural language |
-| `lmgrep status` | Show index stats and embedding connectivity |
+| `lmgrep status` | Show index stats, embedding connectivity, and running processes |
 | `lmgrep serve` | Watch for changes and re-index automatically |
+| `lmgrep mcp` | Start the MCP server (stdio transport) |
 | `lmgrep init` | Detect embedding setup and create config |
 | `lmgrep config` | Open the global config in your editor |
 | `lmgrep repair` | Detect and fix index inconsistencies |
@@ -103,8 +104,8 @@ lmgrep includes an MCP server for use with AI coding assistants. Add it to your 
 {
   "mcpServers": {
     "lmgrep": {
-      "command": "lmgrep-mcp",
-      "args": []
+      "command": "lmgrep",
+      "args": ["mcp"]
     }
   }
 }
@@ -178,4 +179,4 @@ pnpm check        # format and lint (Biome)
 
 ## License
 
-Apache-2.0
+GPL-3.0
