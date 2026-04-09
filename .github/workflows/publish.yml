@@ -30,12 +30,10 @@ jobs:
         run: |
           set -e
 
-          npm install -g npm@latest
-
-          latest=$(npm view lmgrep "dist-tags.latest" 2>/dev/null || echo "0.0.0")
+          latest=$(npx --yes npm@latest view lmgrep "dist-tags.latest" 2>/dev/null || echo "0.0.0")
           next=$(echo "$latest" | awk -F'[.-]' '{ print $1 "." $2 "." $3+1 }')
 
           echo "Latest: $latest -> Next: $next"
           npm pkg set version="$next"
 
-          npm publish --provenance --access public
+          npx --yes npm@latest publish --provenance --access public
