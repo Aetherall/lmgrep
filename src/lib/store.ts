@@ -688,6 +688,44 @@ export class Store {
 
 	// --- Admin ---
 
+	async *streamAllChunks(
+		batchSize: number,
+	): AsyncGenerator<Record<string, unknown>[]> {
+		const t = await this.openChunks();
+		if (!t) return;
+
+		const total = await t.countRows();
+		for (let offset = 0; offset < total; offset += batchSize) {
+			const rows = await t.query().limit(batchSize).offset(offset).toArray();
+			if (rows.length === 0) break;
+			yield rows.map((r) => ({
+				id: r.id,
+				filePath: r.filePath,
+				startLine: r.startLine,
+				endLine: r.endLine,
+				type: r.type,
+				name: r.name,
+				content: r.content,
+				context: r.context,
+				hash: r.hash,
+				vector: Array.from(r.vector as Iterable<number>),
+			}));
+		}
+	}
+
+	async getAllFileEntries(): Promise<
+		Array<{ filePath: string; fileHash: string; branch: string }>
+	> {
+		const t = await this.openFiles();
+		if (!t) return [];
+		const rows = await t.query().toArray();
+		return rows.map((r) => ({
+			filePath: r.filePath as string,
+			fileHash: r.fileHash as string,
+			branch: (r.branch as string) ?? this.branch,
+		}));
+	}
+
 	async reset(): Promise<void> {
 		const conn = await this.connection();
 		const tables = await conn.tableNames();

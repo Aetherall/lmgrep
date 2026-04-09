@@ -327,6 +327,25 @@ program
 	});
 
 program
+	.command("export")
+	.description("Share this project's index with a peer via P2P")
+	.action(async () => {
+		const cwd = process.cwd();
+		const { startExport } = await import("./lib/p2p.js");
+		const { code, done } = await startExport({
+			cwd,
+			onProgress(sent, total) {
+				process.stderr.write(`\rSending: ${sent}/${total} chunks`);
+			},
+		});
+		console.log(`Share code: ${code}`);
+		console.log("Waiting for peer... (Ctrl+C to cancel)\n");
+		await done;
+		process.stderr.write("\n");
+		console.log("Transfer complete.");
+	});
+
+program
 	.command("init")
 	.description("Detect your embedding setup and create config")
 	.option("--force", "Overwrite existing config")
@@ -527,16 +546,48 @@ program
 	});
 
 program
-	.command("import [db-path]")
+	.command("import [source]")
 	.description(
-		"Import chunks and file hashes from another lmgrep database. " +
-			"If no path is given, tries to find a legacy index for this directory.",
+		"Import chunks from a peer (share code) or another lmgrep database (path). " +
+			"If no argument is given, tries to find a legacy index for this directory.",
 	)
 	.option("--reset", "Reset the current index before importing")
-	.action(async (dbPath: string | undefined, opts) => {
+	.action(async (source: string | undefined, opts) => {
 		const cwd = process.cwd();
 
+		// P2P import if source looks like a share code
+		if (source) {
+			const { SHARE_CODE_RE, startImport } = await import("./lib/p2p.js");
+			if (SHARE_CODE_RE.test(source)) {
+				console.log("Connecting to peer...");
+				const result = await startImport({
+					cwd,
+					code: source,
+					reset: opts.reset,
+					onProgress(received, total) {
+						process.stderr.write(
+							`\rReceiving: ${received}/${total} chunks`,
+						);
+					},
+					onMeta(meta) {
+						console.log(
+							`Peer index: ${meta.chunkCount} chunks` +
+								(meta.model ? `, model: ${meta.model}` : "") +
+								(meta.dimensions ? `, ${meta.dimensions} dims` : ""),
+						);
+					},
+				});
+				process.stderr.write("\n");
+				console.log(
+					`Imported ${result.chunks} chunks and ${result.files} file hashes from peer.`,
+				);
+				return;
+			}
+		}
+
+		// Local import (existing logic)
 		let sourcePath: string;
+		const dbPath = source;
 		if (dbPath) {
 			sourcePath = resolve(cwd, dbPath);
 		} else {

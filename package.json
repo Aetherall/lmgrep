@@ -53,5 +53,8 @@
     "@types/cli-progress": "^3.11.6",
     "@types/node": "^25.5.2",
     "typescript": "^6.0.2"
+  },
+  "optionalDependencies": {
+    "hyperswarm": "^4.17.0"
   }
 }

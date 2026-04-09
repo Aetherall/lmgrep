@@ -64,6 +64,7 @@ export {
 export type { ProjectMetadata, RunningProcess } from "./lib/store.js";
 export { startWatcher } from "./lib/serve.js";
 export { loadConfig, getConfigDir, getGlobalConfigPath } from "./lib/config.js";
+export { startExport, startImport, generateShareCode, SHARE_CODE_RE } from "./lib/p2p.js";
 
 export interface CreateIndexOptions {
 	cwd: string;

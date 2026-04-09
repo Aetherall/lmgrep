@@ -10,6 +10,7 @@ lmgrep uses [Tree-sitter](https://tree-sitter.github.io/tree-sitter/) to parse s
 - **Tree-sitter chunking** — splits code at AST boundaries so search results are complete, meaningful units
 - **MCP server** — built-in MCP server (`lmgrep mcp`) for integration with Claude Code, Cursor, and other AI tools
 - **File watching** — `lmgrep serve` watches for changes and incrementally re-indexes
+- **P2P sharing** — share your index with teammates via direct peer-to-peer transfer
 - **Cross-project search** — search across multiple indexed projects
 - **Git-aware** — respects `.gitignore`, deduplicates across worktrees sharing the same remote
 - **Configurable** — global or per-project config, custom ignore patterns, extension filtering
@@ -67,8 +68,9 @@ lmgrep search "error handling" --file-prefix src/lib --language .ts
 | `lmgrep config` | Open the global config in your editor |
 | `lmgrep repair` | Detect and fix index inconsistencies |
 | `lmgrep compact` | Compact the index to reclaim disk space |
+| `lmgrep export` | Share this project's index with a peer via P2P |
+| `lmgrep import [source]` | Import from a peer (share code) or local database |
 | `lmgrep prune` | Delete the index for the current directory |
-| `lmgrep import [db-path]` | Import chunks from another lmgrep database |
 | `lmgrep completions zsh` | Output or install zsh completions |
 
 ### Search options
@@ -95,6 +97,25 @@ lmgrep search "error handling" --file-prefix src/lib --language .ts
 --dry         Show what would be indexed without doing it
 --verbose     Show file-by-file progress
 ```
+
+## P2P index sharing
+
+Share your index with a teammate without any server or infrastructure. Uses [Hyperswarm](https://github.com/holepunchto/hyperswarm) for direct encrypted peer-to-peer transfer with NAT hole punching.
+
+```sh
+# On your machine — start sharing
+lmgrep export
+# → Share code: lmgrepoceantiger7f3a
+# → Waiting for peer...
+
+# On their machine — receive the index
+lmgrep import lmgrepoceantiger7f3a
+# → Connecting to peer...
+# → Receiving: 4823/4823 chunks
+# → Imported 4823 chunks and 312 file hashes from peer.
+```
+
+Requires `hyperswarm` to be installed (`pnpm add hyperswarm`). It's an optional dependency — lmgrep works fine without it.
 
 ## MCP server
 
