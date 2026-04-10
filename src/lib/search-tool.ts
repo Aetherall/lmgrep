@@ -224,6 +224,20 @@ export async function createLmgrepCore(opts: {
 		pollTimer = setInterval(refreshHealth, intervalMs);
 	}
 
+	function stopHealthLoop(): void {
+		if (!pollTimer) return;
+		clearInterval(pollTimer);
+		pollTimer = undefined;
+	}
+
+	function markHealthy(): void {
+		if (!state.healthy || state.reason !== "ok") {
+			state = { healthy: true, reason: "ok" };
+			for (const cb of listeners) cb(state);
+		}
+		tryStartWatcher();
+	}
+
 	async function executeSearch(args: SearchArgs): Promise<ToolResult> {
 		if (state.reason === "embedding_failed") {
 			return {
@@ -239,6 +253,12 @@ export async function createLmgrepCore(opts: {
 				language: args.language,
 				project: args.project,
 			});
+
+			// A successful search proves the embedder is reachable and the
+			// index is queryable — no need to keep pinging via health checks,
+			// which would prevent a local embedder from going to sleep.
+			markHealthy();
+			stopHealthLoop();
 
 			if (results.length === 0) {
 				return { text: "No results found." };
@@ -257,6 +277,9 @@ export async function createLmgrepCore(opts: {
 
 			return { text };
 		} catch (err) {
+			// Search failed — the embedder may be down. Resume polling so we
+			// can detect recovery and update the tool description.
+			startHealthLoop();
 			const msg = err instanceof Error ? err.message : String(err);
 			return { text: `Error: ${msg}`, isError: true };
 		}
@@ -277,10 +300,7 @@ export async function createLmgrepCore(opts: {
 
 	async function dispose(): Promise<void> {
 		disposed = true;
-		if (pollTimer) {
-			clearInterval(pollTimer);
-			pollTimer = undefined;
-		}
+		stopHealthLoop();
 		stopWatcher?.();
 		stopWatcher = undefined;
 		listeners.clear();
