@@ -18,7 +18,15 @@ export type LanguageId =
 	| "toml"
 	| "lua"
 	| "scala"
-	| "zig";
+	| "zig"
+	| "bash"
+	| "html"
+	| "css"
+	| "java"
+	| "kotlin"
+	| "php"
+	| "c_sharp"
+	| "vue";
 
 export interface LanguageConfig {
 	id: LanguageId;
@@ -260,6 +268,107 @@ export const LANGUAGES: LanguageConfig[] = [
 		chunkTypes: ["FnProto", "VarDecl", "ContainerDecl", "TestDecl"],
 		importTypes: [],
 		scopeTypes: ["ContainerDecl"],
+	},
+	{
+		id: "bash",
+		extensions: [".sh", ".bash"],
+		wasmFile: "tree-sitter-bash.wasm",
+		chunkTypes: ["function_definition"],
+		importTypes: ["command"],
+		scopeTypes: [],
+	},
+	{
+		id: "html",
+		extensions: [".html"],
+		wasmFile: "tree-sitter-html.wasm",
+		chunkTypes: ["element", "script_element", "style_element"],
+		importTypes: [],
+		scopeTypes: ["element"],
+	},
+	{
+		id: "css",
+		extensions: [".css", ".scss"],
+		wasmFile: "tree-sitter-css.wasm",
+		chunkTypes: ["rule_set", "media_statement", "keyframes_statement"],
+		importTypes: ["import_statement"],
+		scopeTypes: [],
+	},
+	{
+		id: "java",
+		extensions: [".java"],
+		wasmFile: "tree-sitter-java.wasm",
+		chunkTypes: [
+			"class_declaration",
+			"interface_declaration",
+			"enum_declaration",
+			"method_declaration",
+			"constructor_declaration",
+			"record_declaration",
+		],
+		importTypes: ["import_declaration"],
+		scopeTypes: ["class_declaration", "interface_declaration"],
+	},
+	{
+		id: "kotlin",
+		extensions: [".kt"],
+		wasmFile: "tree-sitter-kotlin.wasm",
+		chunkTypes: [
+			"class_declaration",
+			"object_declaration",
+			"function_declaration",
+			"property_declaration",
+		],
+		importTypes: ["import_header"],
+		scopeTypes: ["class_declaration", "object_declaration"],
+	},
+	{
+		id: "php",
+		extensions: [".php"],
+		wasmFile: "tree-sitter-php.wasm",
+		chunkTypes: [
+			"class_declaration",
+			"interface_declaration",
+			"trait_declaration",
+			"enum_declaration",
+			"function_definition",
+			"method_declaration",
+		],
+		importTypes: ["namespace_use_declaration"],
+		scopeTypes: [
+			"class_declaration",
+			"interface_declaration",
+			"trait_declaration",
+		],
+	},
+	{
+		id: "c_sharp",
+		extensions: [".cs"],
+		wasmFile: "tree-sitter-c_sharp.wasm",
+		chunkTypes: [
+			"class_declaration",
+			"interface_declaration",
+			"struct_declaration",
+			"enum_declaration",
+			"record_declaration",
+			"method_declaration",
+			"constructor_declaration",
+			"property_declaration",
+		],
+		importTypes: ["using_directive"],
+		scopeTypes: [
+			"class_declaration",
+			"interface_declaration",
+			"struct_declaration",
+			"namespace_declaration",
+		],
+	},
+	{
+		id: "vue",
+		extensions: [".vue"],
+		wasmFile: "tree-sitter-vue.wasm",
+		chunkTypes: ["script_element", "template_element", "style_element"],
+		importTypes: [],
+		scopeTypes: [],
 	},
 ];
 

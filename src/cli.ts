@@ -20,7 +20,6 @@ import {
 	Store,
 	getDbPath,
 	getLegacyDbPath,
-	isDbLocked,
 	readProjectMetadata,
 	extractModelFamily,
 	discoverRunningProcesses,
@@ -49,12 +48,6 @@ program
 	.option("-d, --dry", "Show what would be indexed without actually doing it")
 	.action(async (opts) => {
 		const cwd = process.cwd();
-		if (!opts.dry && isDbLocked(cwd)) {
-			console.error(
-				"Another process is writing to this index (serve or another lmgrep instance). Try again later.",
-			);
-			process.exit(1);
-		}
 		const index = await createIndex({ cwd });
 		await index.build({
 			reset: opts.reset,

@@ -30,6 +30,20 @@ async function batchDelete(table: Table, column: string, values: string[]): Prom
 	}
 }
 
+/**
+ * Legacy indexes (pre branch-scoping) have a `files` table without a `branch`
+ * column. Detect and backfill it with the current branch so queries that filter
+ * by branch keep working.
+ */
+async function migrateBranchColumn(table: Table, currentBranch: string): Promise<void> {
+	const schema = await table.schema();
+	if (schema.fields.some((f) => f.name === "branch")) return;
+	const escaped = currentBranch.replace(/'/g, "''");
+	await table.addColumns([
+		{ name: "branch", valueSql: `CAST('${escaped}' AS STRING)` },
+	]);
+}
+
 function git(cwd: string, ...args: string[]): string | undefined {
 	try {
 		return execSync(`git ${args.join(" ")}`, {
@@ -428,7 +442,9 @@ export class Store {
 		const conn = await this.connection();
 		const tables = await conn.tableNames();
 		if (tables.includes(FILES_TABLE)) {
-			this.filesTable = await conn.openTable(FILES_TABLE);
+			const t = await conn.openTable(FILES_TABLE);
+			await migrateBranchColumn(t, this.branch);
+			this.filesTable = t;
 			return this.filesTable;
 		}
 		return undefined;

@@ -168,6 +168,10 @@ export function startWatcher(
 		}
 	}
 
+	// Kick off an initial catch-up index so newly-checked-out branches get
+	// their manifest bootstrapped and any changes made while offline are picked up.
+	runIndex();
+
 	const watcher = watchFiles(
 		cwd,
 		config.ignore,
