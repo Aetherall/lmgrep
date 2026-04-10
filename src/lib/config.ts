@@ -11,6 +11,7 @@ const ConfigSchema = z.object({
 		.regex(/^.+:.+$/, 'Model must be in "provider:model" format (e.g. "ollama:nomic-embed-text")'),
 	provider: z.string().optional(),
 	baseURL: z.string().url().optional(),
+	local: z.boolean().optional(),
 	batchSize: z.number().int().positive().default(100),
 	dimensions: z.number().int().positive().optional(),
 	queryPrefix: z.string().optional(),

@@ -221,13 +221,35 @@ export async function createIndex(
 			let totalChunks = 0;
 			for (const [, h] of files) totalChunks += h.length;
 
+			// Embed once with a generic query, then reuse the vector for the
+			// smoke search — one network roundtrip covers both checks.
 			let embeddingOk = false;
 			let embeddingLatencyMs: number | undefined;
+			let searchOk = false;
+			let searchResultCount: number | undefined;
+			let searchLatencyMs: number | undefined;
+
 			try {
-				const start = Date.now();
-				await embedder.embedQuery("test");
-				embeddingLatencyMs = Date.now() - start;
+				const embedStart = Date.now();
+				const vector = await withTimeout(
+					embedder.embedQuery("code"),
+					3000,
+				);
+				embeddingLatencyMs = Date.now() - embedStart;
 				embeddingOk = true;
+
+				if (files.size > 0) {
+					try {
+						const searchStart = Date.now();
+						const results = await withTimeout(
+							statusStore.search(vector, 1),
+							3000,
+						);
+						searchLatencyMs = Date.now() - searchStart;
+						searchResultCount = results.length;
+						searchOk = results.length > 0;
+					} catch {}
+				}
 			} catch {}
 
 			// Read index metadata for model/dimensions info
@@ -242,6 +264,9 @@ export async function createIndex(
 				uniqueHashes: hashes.size,
 				embeddingOk,
 				embeddingLatencyMs,
+				searchOk,
+				searchResultCount,
+				searchLatencyMs,
 				indexModel: meta?.model,
 				indexDimensions: meta?.dimensions,
 			};
@@ -254,6 +279,22 @@ export async function createIndex(
 }
 
 // --- Internal helpers ---
+
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+	return new Promise((resolve, reject) => {
+		const timer = setTimeout(() => reject(new Error(`timeout after ${ms}ms`)), ms);
+		promise.then(
+			(v) => {
+				clearTimeout(timer);
+				resolve(v);
+			},
+			(e) => {
+				clearTimeout(timer);
+				reject(e);
+			},
+		);
+	});
+}
 
 interface SearchTarget {
 	store: Store;

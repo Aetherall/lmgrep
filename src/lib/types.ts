@@ -5,6 +5,12 @@ export interface LmgrepConfig {
 	provider?: string;
 	/** Base URL for OpenAI-compatible providers */
 	baseURL?: string;
+	/**
+	 * Provider runs locally with no per-request cost (e.g. ollama, lmstudio).
+	 * When true, background health checks may call the embedding endpoint freely;
+	 * when false, checks are run sparingly to avoid billed API calls.
+	 */
+	local?: boolean;
 	/** Number of texts to embed per API call */
 	batchSize: number;
 	/** Embedding dimensions (if the model supports configurable dimensions) */
@@ -102,6 +108,10 @@ export interface StatusInfo {
 	uniqueHashes: number;
 	embeddingOk: boolean;
 	embeddingLatencyMs?: number;
+	/** Smoke search check: did a generic query return ≥1 result? */
+	searchOk: boolean;
+	searchResultCount?: number;
+	searchLatencyMs?: number;
 	/** Model string from the index metadata (what built the baseline) */
 	indexModel?: string;
 	/** Embedding dimensions from the index metadata */

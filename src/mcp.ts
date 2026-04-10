@@ -22,10 +22,42 @@ const cwd = process.cwd();
 
 // --- Index state ---
 
+type HealthReason =
+	| "ok"
+	| "not_indexed"
+	| "embedding_failed"
+	| "search_empty";
+
+interface HealthState {
+	healthy: boolean;
+	reason: HealthReason;
+}
+
 function isCurrentProjectIndexed(): boolean {
 	const ancestor = findIndexedAncestor(cwd);
 	if (ancestor) return true;
 	return existsSync(getDbPath(cwd));
+}
+
+async function checkHealth(): Promise<HealthState> {
+	if (!isCurrentProjectIndexed()) {
+		return { healthy: false, reason: "not_indexed" };
+	}
+	try {
+		const info = await index.status();
+		if (info.fileCount === 0) {
+			return { healthy: false, reason: "not_indexed" };
+		}
+		if (!info.embeddingOk) {
+			return { healthy: false, reason: "embedding_failed" };
+		}
+		if (!info.searchOk) {
+			return { healthy: false, reason: "search_empty" };
+		}
+		return { healthy: true, reason: "ok" };
+	} catch {
+		return { healthy: false, reason: "embedding_failed" };
+	}
 }
 
 function getOtherProjects(): Array<{ root: string; remote?: string }> {
@@ -41,8 +73,8 @@ function getOtherProjects(): Array<{ root: string; remote?: string }> {
 		}));
 }
 
-function buildSearchDescription(): string {
-	if (isCurrentProjectIndexed()) {
+function buildSearchDescription(state: HealthState): string {
+	if (state.healthy) {
 		return (
 			"Search the codebase using semantic similarity. " +
 			"Returns code chunks with file paths, line numbers, and context. " +
@@ -52,14 +84,30 @@ function buildSearchDescription(): string {
 	}
 
 	const others = getOtherProjects();
-	let desc =
-		"This project is not indexed. Semantic search is not available for the current directory.";
-	if (others.length > 0) {
-		desc +=
-			" However, you can search other indexed projects using the `project` parameter." +
-			" Use the `list_other_indexed_projects` tool to see what's available.";
+	const suffix =
+		others.length > 0
+			? " You can still search other indexed projects via the `project` parameter — call `list_other_indexed_projects` to see what's available."
+			: "";
+
+	switch (state.reason) {
+		case "not_indexed":
+			return (
+				"This project is not indexed. Semantic search is not available for the current directory." +
+				suffix
+			);
+		case "embedding_failed":
+			return (
+				"The embedding provider is unreachable. Semantic search is temporarily unavailable for the current directory." +
+				suffix
+			);
+		case "search_empty":
+			return (
+				"The index for the current branch appears empty or stale — a smoke query returned no results. Re-run `lmgrep index` to rebuild." +
+				suffix
+			);
+		default:
+			return "Semantic search is unavailable." + suffix;
 	}
-	return desc;
 }
 
 // --- In-process watcher ---
@@ -88,9 +136,15 @@ const server = new McpServer({
 
 const index = await createIndex({ cwd });
 
+// Initial optimistic/pessimistic description based on the cheap file-system check.
+// The first async health check below will refine this and push an update if needed.
+const initialState: HealthState = isCurrentProjectIndexed()
+	? { healthy: true, reason: "ok" }
+	: { healthy: false, reason: "not_indexed" };
+
 const searchTool = server.tool(
 	"search",
-	buildSearchDescription(),
+	buildSearchDescription(initialState),
 	{
 		query: z.string().describe("What you're looking for, in natural language"),
 		limit: z
@@ -198,21 +252,32 @@ server.tool(
 
 // --- Watch for index state changes and update tool description ---
 
-let wasIndexed = isCurrentProjectIndexed();
+let lastState: HealthState = initialState;
 tryStartWatcher();
 
-setInterval(() => {
-	const nowIndexed = isCurrentProjectIndexed();
-	if (nowIndexed !== wasIndexed) {
-		wasIndexed = nowIndexed;
-		searchTool.update({ description: buildSearchDescription() });
-
-		// Start watcher if project just got indexed
-		if (nowIndexed) {
-			tryStartWatcher();
-		}
+async function refreshHealth(): Promise<void> {
+	const next = await checkHealth();
+	if (
+		next.healthy !== lastState.healthy ||
+		next.reason !== lastState.reason
+	) {
+		lastState = next;
+		searchTool.update({ description: buildSearchDescription(next) });
 	}
-}, 10_000);
+	if (next.healthy) {
+		tryStartWatcher();
+	}
+}
+
+// Non-local providers may bill per request — poll less often to avoid a drip.
+// Local providers (ollama, lmstudio, etc.) can be checked aggressively.
+const healthPollIntervalMs = index.config.local ? 10_000 : 60_000;
+
+// Kick off an immediate refresh so the initial description reflects the full
+// health check (embedding + smoke search), not just the file-system probe.
+refreshHealth();
+
+setInterval(refreshHealth, healthPollIntervalMs);
 
 // --- Cleanup on exit ---
 

@@ -214,6 +214,17 @@ program
 			console.log(`  FAILED`);
 		}
 
+		console.log(`\nSearch check:`);
+		if (info.searchOk) {
+			console.log(
+				`  OK (${info.searchResultCount} result, ${info.searchLatencyMs}ms)`,
+			);
+		} else if (info.embeddingOk && info.fileCount > 0) {
+			console.log(`  FAILED (query returned no results)`);
+		} else {
+			console.log(`  SKIPPED`);
+		}
+
 		if (processes.length > 0) {
 			console.log(`\nRunning processes:`);
 			for (const proc of processes) {
