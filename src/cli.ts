@@ -16,12 +16,15 @@ import { execSync } from "node:child_process";
 import { createIndex } from "./index.js";
 import { getGlobalConfigPath } from "./lib/config.js";
 import { walkFiles } from "./lib/scanner.js";
+import { renameSync } from "node:fs";
 import {
 	Store,
+	buildSlug,
 	getDbPath,
 	getLegacyDbPath,
 	readProjectMetadata,
 	extractModelFamily,
+	discoverIndexedProjects,
 	discoverRunningProcesses,
 } from "./lib/store.js";
 
@@ -500,6 +503,94 @@ program
 			);
 			process.exit(1);
 		}
+	});
+
+program
+	.command("migrate")
+	.description(
+		"Rename existing index directories to match the current slug scheme",
+	)
+	.option("-d, --dry", "Show what would be migrated without making changes")
+	.action(async (opts) => {
+		const baseDir = join(homedir(), ".local", "state", "lmgrep");
+		const projects = discoverIndexedProjects();
+		if (projects.length === 0) {
+			console.log("No indexed projects found.");
+			return;
+		}
+
+		const moves: Array<{
+			from: string;
+			to: string;
+			id: string;
+			conflict: boolean;
+		}> = [];
+
+		// Track which target paths already exist on disk OR are claimed by an
+		// already-correctly-named source — those count as conflicts for any
+		// other source mapping to the same target.
+		const claimedTargets = new Set<string>();
+		for (const { dbPath, metadata } of projects) {
+			const id = metadata.remote ?? metadata.root;
+			const targetSlug = buildSlug(id);
+			const targetPath = resolve(join(baseDir, targetSlug));
+			if (resolve(dbPath) === targetPath) {
+				claimedTargets.add(targetPath);
+			}
+		}
+
+		for (const { dbPath, metadata } of projects) {
+			const id = metadata.remote ?? metadata.root;
+			const targetSlug = buildSlug(id);
+			const targetPath = join(baseDir, targetSlug);
+			const targetAbs = resolve(targetPath);
+			if (resolve(dbPath) === targetAbs) continue;
+			const conflict =
+				claimedTargets.has(targetAbs) || existsSync(targetPath);
+			moves.push({ from: dbPath, to: targetPath, id, conflict });
+			// First non-conflicting mover claims the target so subsequent
+			// movers in this run see it as a conflict.
+			if (!conflict) claimedTargets.add(targetAbs);
+		}
+
+		if (moves.length === 0) {
+			console.log("All indexes already use the current slug scheme.");
+			return;
+		}
+
+		console.log(`Found ${moves.length} index(es) to migrate:\n`);
+		for (const m of moves) {
+			const arrow = m.conflict ? "→ (conflict, skipped)" : "→";
+			console.log(`  ${m.from}\n  ${arrow} ${m.to}\n`);
+		}
+
+		const conflicts = moves.filter((m) => m.conflict);
+		if (conflicts.length > 0) {
+			console.log(
+				`${conflicts.length} conflict(s): target already exists. ` +
+					"These are likely sibling worktrees that already share a unified " +
+					"index — delete the stale source manually with `rm -rf` after " +
+					"verifying it's redundant.",
+			);
+		}
+
+		if (opts.dry) {
+			console.log("\nDry run — no changes made.");
+			return;
+		}
+
+		let migrated = 0;
+		for (const m of moves) {
+			if (m.conflict) continue;
+			try {
+				renameSync(m.from, m.to);
+				migrated++;
+			} catch (err) {
+				const msg = err instanceof Error ? err.message : String(err);
+				console.error(`Failed to migrate ${m.from}: ${msg}`);
+			}
+		}
+		console.log(`\nMigrated ${migrated} index(es).`);
 	});
 
 program

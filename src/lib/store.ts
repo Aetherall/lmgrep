@@ -86,16 +86,31 @@ export function resolveProject(cwd: string): { id: string; root: string; branch:
 	return { id: absolute, root: absolute, branch: "_default" };
 }
 
-function buildSlug(id: string, root: string): string {
+function slugifyId(id: string): string {
+	// Strip git URL scheme and trailing .git so worktrees of the same repo
+	// produce the same human-readable prefix regardless of the worktree path.
+	// git@host:user/repo.git → user/repo
+	// https://host/user/repo.git → host/user/repo (we'll take the last two)
+	// /abs/path/to/project → path/to/project (we'll take the last two)
+	let s = id.replace(/\.git$/, "");
+	const scpMatch = s.match(/^[^@]+@[^:]+:(.+)$/);
+	if (scpMatch) {
+		s = scpMatch[1];
+	} else {
+		s = s.replace(/^[a-z]+:\/\/[^/]+\//, "");
+	}
+	const parts = s.split("/").filter(Boolean);
+	return parts.slice(-2).join("-").replace(/[^a-zA-Z0-9_-]/g, "_");
+}
+
+export function buildSlug(id: string): string {
 	const hash = createHash("sha256").update(id).digest("hex").slice(0, 8);
-	const parts = root.split("/").filter(Boolean);
-	const slug = parts.slice(-2).join("-").replace(/[^a-zA-Z0-9_-]/g, "_");
-	return `${slug}-${hash}`;
+	return `${slugifyId(id)}-${hash}`;
 }
 
 export function getDbPath(cwd: string): string {
-	const { id, root } = resolveProject(cwd);
-	return join(homedir(), ".local", "state", "lmgrep", buildSlug(id, root));
+	const { id } = resolveProject(cwd);
+	return join(homedir(), ".local", "state", "lmgrep", buildSlug(id));
 }
 
 /**

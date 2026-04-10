@@ -67,6 +67,7 @@ lmgrep search "error handling" --file-prefix src/lib --language .ts
 | `lmgrep init` | Detect embedding setup and create config |
 | `lmgrep config` | Open the global config in your editor |
 | `lmgrep repair` | Detect and fix index inconsistencies |
+| `lmgrep migrate` | Rename existing index directories to match the current slug scheme |
 | `lmgrep compact` | Compact the index to reclaim disk space |
 | `lmgrep export` | Share this project's index with a peer via P2P |
 | `lmgrep import [source]` | Import from a peer (share code) or local database |
