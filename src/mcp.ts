@@ -4,310 +4,76 @@ process.title = "lmgrep-mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
-import { createIndex } from "./index.js";
-import {
-	findIndexedAncestor,
-	discoverIndexedProjects,
-	getDbPath,
-} from "./lib/store.js";
-import { startWatcher } from "./lib/serve.js";
-import { loadConfig } from "./lib/config.js";
-import { AISDKEmbedder } from "./lib/embedder.js";
-import { TreeSitterChunker } from "./lib/chunker/index.js";
-import { Store } from "./lib/store.js";
-import { existsSync } from "node:fs";
-import { silentLogger } from "./lib/types.js";
+import { createLmgrepCore } from "./lib/search-tool.js";
 
-const cwd = process.cwd();
-
-// --- Index state ---
-
-type HealthReason =
-	| "ok"
-	| "not_indexed"
-	| "embedding_failed"
-	| "search_empty";
-
-interface HealthState {
-	healthy: boolean;
-	reason: HealthReason;
-}
-
-function isCurrentProjectIndexed(): boolean {
-	const ancestor = findIndexedAncestor(cwd);
-	if (ancestor) return true;
-	return existsSync(getDbPath(cwd));
-}
-
-async function checkHealth(): Promise<HealthState> {
-	if (!isCurrentProjectIndexed()) {
-		return { healthy: false, reason: "not_indexed" };
-	}
-	try {
-		const info = await index.status();
-		if (info.fileCount === 0) {
-			return { healthy: false, reason: "not_indexed" };
-		}
-		if (!info.embeddingOk) {
-			return { healthy: false, reason: "embedding_failed" };
-		}
-		if (!info.searchOk) {
-			return { healthy: false, reason: "search_empty" };
-		}
-		return { healthy: true, reason: "ok" };
-	} catch {
-		return { healthy: false, reason: "embedding_failed" };
-	}
-}
-
-function getOtherProjects(): Array<{ root: string; remote?: string }> {
-	const currentDb = getDbPath(cwd);
-	return discoverIndexedProjects()
-		.filter((p) => {
-			const pDb = getDbPath(p.metadata.root);
-			return pDb !== currentDb;
-		})
-		.map((p) => ({
-			root: p.metadata.root,
-			remote: p.metadata.remote,
-		}));
-}
-
-function buildSearchDescription(state: HealthState): string {
-	if (state.healthy) {
-		return [
-			"**lmgrep — primary search tool for this codebase.** Semantic code search powered by a local embedding model; lmgrep understands intent, not string patterns. Prefer lmgrep over Grep/Glob/find/ripgrep for almost all exploration and lookup tasks.",
-			"",
-			"**Use lmgrep for:** finding where something is handled, how something works, locating relevant code, discovering related files, understanding unfamiliar code, tracing side effects, finding usage patterns, answering \"where is X?\" or \"how does Y work?\". One good lmgrep query is usually enough to understand how to proceed.",
-			"",
-			"**Query lmgrep as natural questions or intent descriptions**, not keyword dumps:",
-			'- "how are webhooks authenticated" → finds middleware, token validation, auth checks',
-			'- "where is user deletion handled" → finds the handler and related cleanup logic',
-			'- "what happens when a record is created" → finds controllers, event emitters, side effects',
-			'- "config loading and validation"',
-			'- "how to run the playwright tests" → finds config, scripts, prerequisites',
-			"",
-			"**lmgrep results include** file paths, line numbers, AST node types, and surrounding context (scope, leading comments, role) — often enough to act on directly without re-reading the file. Trust lmgrep results; don't follow up with Glob/Read on files already surfaced by lmgrep unless you genuinely need content that wasn't returned.",
-			"",
-			"**Fall back to Grep only** when you need exact string or regex matches (specific identifiers, literal constants, error messages, TODO markers). Don't use Grep/Glob/find for conceptual or intent-based search — lmgrep will do better.",
-		].join("\n");
-	}
-
-	const others = getOtherProjects();
-	const suffix =
-		others.length > 0
-			? " You can still search other indexed projects via the `project` parameter — call `list_other_indexed_projects` to see what's available."
-			: "";
-
-	switch (state.reason) {
-		case "not_indexed":
-			return (
-				"This project is not indexed. Semantic search is not available for the current directory." +
-				suffix
-			);
-		case "embedding_failed":
-			return (
-				"The embedding provider is unreachable. Semantic search is temporarily unavailable for the current directory." +
-				suffix
-			);
-		case "search_empty":
-			return (
-				"The index for the current branch appears empty or stale — a smoke query returned no results. Re-run `lmgrep index` to rebuild." +
-				suffix
-			);
-		default:
-			return "Semantic search is unavailable." + suffix;
-	}
-}
-
-// --- In-process watcher ---
-
-let stopWatcher: (() => void) | undefined;
-
-function tryStartWatcher(): void {
-	if (stopWatcher) return; // already watching
-	if (!isCurrentProjectIndexed()) return;
-
-	const config = loadConfig(cwd);
-	const store = Store.forProject(cwd);
-	const embedder = new AISDKEmbedder(config);
-	const chunker = new TreeSitterChunker();
-
-	stopWatcher = startWatcher(cwd, store, config, embedder, chunker, silentLogger);
-	// undefined means lock was held by another process — that's fine
-}
-
-// --- MCP server ---
+const core = await createLmgrepCore({ cwd: process.cwd() });
 
 const server = new McpServer({
 	name: "lmgrep",
 	version: "0.1.0",
 });
 
-const index = await createIndex({ cwd });
-
-// Initial optimistic/pessimistic description based on the cheap file-system check.
-// The first async health check below will refine this and push an update if needed.
-const initialState: HealthState = isCurrentProjectIndexed()
-	? { healthy: true, reason: "ok" }
-	: { healthy: false, reason: "not_indexed" };
-
 const searchTool = server.tool(
 	"search",
-	buildSearchDescription(initialState),
+	core.buildSearchDescription(),
 	{
-		query: z
-			.string()
-			.describe(
-				'Natural-language description of what you\'re looking for — phrase it as a question or intent, not keywords. Good: "how are webhooks authenticated", "where is user deletion handled", "what happens when a record is created". Bad: "webhook auth", "deleteUser", "createRecord".',
-			),
+		query: z.string().describe(core.searchParams.query.description),
 		limit: z
 			.number()
 			.optional()
-			.default(10)
-			.describe("Maximum number of results"),
+			.default(core.searchParams.limit.default)
+			.describe(core.searchParams.limit.description),
 		filePrefix: z
 			.string()
 			.optional()
-			.describe("Restrict to files under this path (e.g. 'src/lib')"),
+			.describe(core.searchParams.filePrefix.description),
 		type: z
 			.array(z.string())
 			.optional()
-			.describe(
-				"AST node types to filter by (e.g. ['function_declaration', 'class_declaration'])",
-			),
+			.describe(core.searchParams.type.description),
 		language: z
 			.array(z.string())
 			.optional()
-			.describe("File extensions to filter by (e.g. ['.ts', '.py'])"),
+			.describe(core.searchParams.language.description),
 		project: z
 			.string()
 			.optional()
-			.describe(
-				"Search a different indexed project by its root path instead of the current one",
-			),
+			.describe(core.searchParams.project.description),
 	},
-	async ({ query, limit, filePrefix, type, language, project }) => {
-		try {
-			const results = await index.search(query, {
-				limit,
-				filePrefix,
-				type,
-				language,
-				project,
-			});
-
-			if (results.length === 0) {
-				return {
-					content: [{ type: "text" as const, text: "No results found." }],
-				};
-			}
-
-			const text = results
-				.map((r) => {
-					const loc = `${r.filePath}:${r.startLine}-${r.endLine}`;
-					const header = `${loc} [${r.type}] ${r.name} (score: ${r.score.toFixed(3)})`;
-					const parts = [header];
-					if (r.context) parts.push(r.context);
-					parts.push(r.content);
-					return parts.join("\n");
-				})
-				.join("\n\n---\n\n");
-
-			return {
-				content: [{ type: "text" as const, text }],
-			};
-		} catch (err) {
-			const msg = err instanceof Error ? err.message : String(err);
-			return {
-				content: [{ type: "text" as const, text: `Error: ${msg}` }],
-				isError: true,
-			};
-		}
+	async (args) => {
+		const result = await core.executeSearch(args);
+		return {
+			content: [{ type: "text" as const, text: result.text }],
+			...(result.isError ? { isError: true } : {}),
+		};
 	},
 );
 
 server.tool(
 	"list_other_indexed_projects",
-	"List all indexed projects other than the current one. " +
-		"Use this to discover what projects are available for cross-project search " +
-		"via the `project` parameter on the search tool.",
+	core.listProjectsDescription,
 	{},
 	async () => {
-		const others = getOtherProjects();
-
-		if (others.length === 0) {
-			return {
-				content: [
-					{
-						type: "text" as const,
-						text: "No other indexed projects found.",
-					},
-				],
-			};
-		}
-
-		const lines = others.map((p) => {
-			const parts = [p.root];
-			if (p.remote) parts.push(`(${p.remote})`);
-			return `- ${parts.join(" ")}`;
-		});
-
-		return {
-			content: [
-				{
-					type: "text" as const,
-					text: `Indexed projects:\n${lines.join("\n")}`,
-				},
-			],
-		};
+		const result = await core.executeListProjects();
+		return { content: [{ type: "text" as const, text: result.text }] };
 	},
 );
 
-// --- Watch for index state changes and update tool description ---
+core.onHealthChange(() => {
+	searchTool.update({ description: core.buildSearchDescription() });
+});
 
-let lastState: HealthState = initialState;
-tryStartWatcher();
-
-async function refreshHealth(): Promise<void> {
-	const next = await checkHealth();
-	if (
-		next.healthy !== lastState.healthy ||
-		next.reason !== lastState.reason
-	) {
-		lastState = next;
-		searchTool.update({ description: buildSearchDescription(next) });
-	}
-	if (next.healthy) {
-		tryStartWatcher();
-	}
-}
-
-// Non-local providers may bill per request — poll less often to avoid a drip.
-// Local providers (ollama, lmstudio, etc.) can be checked aggressively.
-const healthPollIntervalMs = index.config.local ? 10_000 : 60_000;
-
-// Kick off an immediate refresh so the initial description reflects the full
-// health check (embedding + smoke search), not just the file-system probe.
-refreshHealth();
-
-setInterval(refreshHealth, healthPollIntervalMs);
-
-// --- Cleanup on exit ---
+core.startHealthLoop();
 
 process.on("exit", () => {
-	stopWatcher?.();
+	core.dispose().catch(() => {});
 });
 process.on("SIGINT", () => {
-	stopWatcher?.();
-	process.exit(0);
+	core.dispose().finally(() => process.exit(0));
 });
 process.on("SIGTERM", () => {
-	stopWatcher?.();
-	process.exit(0);
+	core.dispose().finally(() => process.exit(0));
 });
-
-// --- Start ---
 
 async function main() {
 	const transport = new StdioServerTransport();
