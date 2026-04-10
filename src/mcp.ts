@@ -75,12 +75,22 @@ function getOtherProjects(): Array<{ root: string; remote?: string }> {
 
 function buildSearchDescription(state: HealthState): string {
 	if (state.healthy) {
-		return (
-			"Search the codebase using semantic similarity. " +
-			"Returns code chunks with file paths, line numbers, and context. " +
-			"Use natural language queries describing what you're looking for. " +
-			"Results are ranked by relevance."
-		);
+		return [
+			"**lmgrep — primary search tool for this codebase.** Semantic code search powered by a local embedding model; lmgrep understands intent, not string patterns. Prefer lmgrep over Grep/Glob/find/ripgrep for almost all exploration and lookup tasks.",
+			"",
+			"**Use lmgrep for:** finding where something is handled, how something works, locating relevant code, discovering related files, understanding unfamiliar code, tracing side effects, finding usage patterns, answering \"where is X?\" or \"how does Y work?\". One good lmgrep query is usually enough to understand how to proceed.",
+			"",
+			"**Query lmgrep as natural questions or intent descriptions**, not keyword dumps:",
+			'- "how are webhooks authenticated" → finds middleware, token validation, auth checks',
+			'- "where is user deletion handled" → finds the handler and related cleanup logic',
+			'- "what happens when a record is created" → finds controllers, event emitters, side effects',
+			'- "config loading and validation"',
+			'- "how to run the playwright tests" → finds config, scripts, prerequisites',
+			"",
+			"**lmgrep results include** file paths, line numbers, AST node types, and surrounding context (scope, leading comments, role) — often enough to act on directly without re-reading the file. Trust lmgrep results; don't follow up with Glob/Read on files already surfaced by lmgrep unless you genuinely need content that wasn't returned.",
+			"",
+			"**Fall back to Grep only** when you need exact string or regex matches (specific identifiers, literal constants, error messages, TODO markers). Don't use Grep/Glob/find for conceptual or intent-based search — lmgrep will do better.",
+		].join("\n");
 	}
 
 	const others = getOtherProjects();
@@ -146,7 +156,11 @@ const searchTool = server.tool(
 	"search",
 	buildSearchDescription(initialState),
 	{
-		query: z.string().describe("What you're looking for, in natural language"),
+		query: z
+			.string()
+			.describe(
+				'Natural-language description of what you\'re looking for — phrase it as a question or intent, not keywords. Good: "how are webhooks authenticated", "where is user deletion handled", "what happens when a record is created". Bad: "webhook auth", "deleteUser", "createRecord".',
+			),
 		limit: z
 			.number()
 			.optional()
