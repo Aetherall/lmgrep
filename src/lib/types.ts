@@ -95,7 +95,6 @@ export interface ProgressEvent {
 export interface RepairResult {
 	orphaned: string[];
 	stale: string[];
-	chunkMismatch: string[];
 	chunksRemoved: number;
 }
 

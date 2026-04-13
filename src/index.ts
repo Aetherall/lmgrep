@@ -201,7 +201,7 @@ export async function createIndex(
 		},
 
 		async repair(dry = false) {
-			return repair(cwd, store, chunker, dry, logger);
+			return repair(cwd, store, dry, logger);
 		},
 
 		async watch() {
