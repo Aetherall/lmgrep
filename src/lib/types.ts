@@ -108,6 +108,8 @@ export interface StatusInfo {
 	uniqueHashes: number;
 	embeddingOk: boolean;
 	embeddingLatencyMs?: number;
+	/** Error message from the embedding probe, if it failed. */
+	embeddingError?: string;
 	/** Smoke search check: did a generic query return ≥1 result? */
 	searchOk: boolean;
 	searchResultCount?: number;

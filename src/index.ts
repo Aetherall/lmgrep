@@ -225,6 +225,7 @@ export async function createIndex(
 			// smoke search — one network roundtrip covers both checks.
 			let embeddingOk = false;
 			let embeddingLatencyMs: number | undefined;
+			let embeddingError: string | undefined;
 			let searchOk = false;
 			let searchResultCount: number | undefined;
 			let searchLatencyMs: number | undefined;
@@ -250,7 +251,9 @@ export async function createIndex(
 						searchOk = results.length > 0;
 					} catch {}
 				}
-			} catch {}
+			} catch (err) {
+				embeddingError = err instanceof Error ? err.message : String(err);
+			}
 
 			// Read index metadata for model/dimensions info
 			const meta = readProjectMetadata(getDbPath(projectRoot));
@@ -264,6 +267,7 @@ export async function createIndex(
 				uniqueHashes: hashes.size,
 				embeddingOk,
 				embeddingLatencyMs,
+				embeddingError,
 				searchOk,
 				searchResultCount,
 				searchLatencyMs,

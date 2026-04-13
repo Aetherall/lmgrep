@@ -12,7 +12,7 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { execSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 import { createIndex } from "./index.js";
 import { getGlobalConfigPath } from "./lib/config.js";
 import { walkFiles } from "./lib/scanner.js";
@@ -215,6 +215,11 @@ program
 			console.log(`  OK (${info.embeddingLatencyMs}ms)`);
 		} else {
 			console.log(`  FAILED`);
+			if (info.embeddingError) {
+				for (const line of info.embeddingError.split("\n")) {
+					console.log(`  ${line}`);
+				}
+			}
 		}
 
 		console.log(`\nSearch check:`);
@@ -492,14 +497,22 @@ program
 			process.exit(1);
 		}
 
-		const editor =
+		const editorCmd =
 			process.env.VISUAL ?? process.env.EDITOR ?? "vi";
 		console.log(`Opening ${configPath}`);
-		try {
-			execSync(`${editor} ${configPath}`, { stdio: "inherit" });
-		} catch {
+		// $EDITOR may include flags (e.g. "code -w"). Split on whitespace
+		// for the command/flags, but pass the path as its own argv entry so
+		// paths containing spaces (e.g. macOS "Application Support") aren't
+		// re-split by the shell.
+		const parts = editorCmd.trim().split(/\s+/);
+		const editor = parts[0];
+		const editorArgs = parts.slice(1);
+		const result = spawnSync(editor, [...editorArgs, configPath], {
+			stdio: "inherit",
+		});
+		if (result.error || (result.status != null && result.status !== 0)) {
 			console.error(
-				`Could not open editor "${editor}". Set $EDITOR or $VISUAL.`,
+				`Could not open editor "${editorCmd}". Set $EDITOR or $VISUAL.`,
 			);
 			process.exit(1);
 		}
