@@ -711,13 +711,14 @@ export class Store {
 	}
 
 	async upsertFileHashes(
-		entries: Array<{ filePath: string; fileHash: string }>,
+		entries: Array<{ filePath: string; fileHash: string; branch?: string }>,
 	): Promise<void> {
 		if (entries.length === 0) return;
 
 		const records = entries.map((e) => ({
-			...e,
-			branch: this.branch,
+			filePath: e.filePath,
+			fileHash: e.fileHash,
+			branch: e.branch ?? this.branch,
 		}));
 
 		const conn = await this.connection();
@@ -726,15 +727,22 @@ export class Store {
 		if (tables.includes(FILES_TABLE)) {
 			const t = await conn.openTable(FILES_TABLE);
 			this.filesTable = t;
-			// Delete existing entries for this branch + these file paths
-			const escaped = this.branch.replace(/'/g, "''");
-			for (let i = 0; i < entries.length; i += DELETE_BATCH_SIZE) {
-				const batch = entries.slice(i, i + DELETE_BATCH_SIZE);
-				const pathFilter = buildInFilter(
-					"filePath",
-					batch.map((e) => e.filePath),
-				);
-				await t.delete(`branch = '${escaped}' AND ${pathFilter}`);
+			// Delete existing entries for the same branch + filePath pairs.
+			// Group by branch so we don't accidentally clobber other branches'
+			// rows for the same path.
+			const byBranch = new Map<string, string[]>();
+			for (const r of records) {
+				const list = byBranch.get(r.branch) ?? [];
+				list.push(r.filePath);
+				byBranch.set(r.branch, list);
+			}
+			for (const [branch, paths] of byBranch) {
+				const escaped = branch.replace(/'/g, "''");
+				for (let i = 0; i < paths.length; i += DELETE_BATCH_SIZE) {
+					const batch = paths.slice(i, i + DELETE_BATCH_SIZE);
+					const pathFilter = buildInFilter("filePath", batch);
+					await t.delete(`branch = '${escaped}' AND ${pathFilter}`);
+				}
 			}
 			await t.add(records);
 		} else {
