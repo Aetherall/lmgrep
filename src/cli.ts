@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 process.title = "lmgrep";
 
+// Must come first — sets TOKIO/RAYON/UV thread caps before LanceDB native
+// binding initializes its runtime.
+import "./lib/native-tuning.js";
+
 import { Command } from "commander";
 import { createHash } from "node:crypto";
 import {

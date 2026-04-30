@@ -54,6 +54,7 @@
             ln -s ${nodejs}/bin/node $out/lib/lmgrep/lmgrep
             cat > $out/bin/lmgrep <<WRAPPER
             #!${pkgs.bash}/bin/bash
+            export MALLOC_ARENA_MAX=\''${MALLOC_ARENA_MAX:-2}
             exec $out/lib/lmgrep/lmgrep $out/lib/lmgrep/dist/cli.js "\$@"
             WRAPPER
             chmod +x $out/bin/lmgrep
@@ -87,6 +88,7 @@
             ln -s ${nodejs}/bin/node $out/lib/lmgrep/lmgrep-mcp
             cat > $out/bin/lmgrep-mcp <<WRAPPER
             #!${pkgs.bash}/bin/bash
+            export MALLOC_ARENA_MAX=\''${MALLOC_ARENA_MAX:-2}
             exec $out/lib/lmgrep/lmgrep-mcp $out/lib/lmgrep/dist/mcp.js "\$@"
             WRAPPER
             chmod +x $out/bin/lmgrep-mcp

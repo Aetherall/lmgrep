@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 process.title = "lmgrep-mcp";
 
+// Must come first — sets TOKIO/RAYON/UV thread caps before LanceDB native
+// binding initializes its runtime.
+import "./lib/native-tuning.js";
+
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
