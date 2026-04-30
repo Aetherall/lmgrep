@@ -32,6 +32,9 @@ importers:
       ignore:
         specifier: ^7.0.5
         version: 7.0.5
+      stemmer:
+        specifier: ^2.0.1
+        version: 2.0.1
       tree-sitter-wasms:
         specifier: ^0.1.13
         version: 0.1.13
@@ -846,6 +849,10 @@ packages:
   statuses@2.0.2:
     resolution: {integrity: sha512-DvEy55V3DB7uknRo+4iOGT5fP1slR8wQohVdknigZPMpMstaKJQWhwiYBACJE3Ul2pTnATihhBYnRhZQHGBiRw==}
     engines: {node: '>= 0.8'}
+
+  stemmer@2.0.1:
+    resolution: {integrity: sha512-bkWvSX2JR4nSZFfs113kd4C6X13bBBrg4fBKv2pVdzpdQI2LA5pZcWzTFNdkYsiUNl13E4EzymSRjZ0D55jBYg==}
+    hasBin: true
 
   streamx@2.25.0:
     resolution: {integrity: sha512-0nQuG6jf1w+wddNEEXCF4nTg3LtufWINB5eFEN+5TNZW7KWJp6x87+JFL43vaAUPyCfH1wID+mNVyW6OHtFamg==}
@@ -1917,6 +1924,8 @@ snapshots:
     optional: true
 
   statuses@2.0.2: {}
+
+  stemmer@2.0.1: {}
 
   streamx@2.25.0:
     dependencies:

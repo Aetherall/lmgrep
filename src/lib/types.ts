@@ -59,6 +59,62 @@ export interface SearchResult {
 	score: number;
 }
 
+export interface FacetCluster {
+	label: string;
+	/** Top vocab candidates for this cluster's sibling-mean axis (label first, up to 4). */
+	candidates: string[];
+	/**
+	 * Deduped, confidence-filtered qualifiers derived from the pairwise
+	 * (c_i - c_j) axes — one term per sibling where the signal is strong enough,
+	 * stripped of duplicates and the primary label.
+	 */
+	qualifiers?: string[];
+	/**
+	 * Pairwise discriminators: for each sibling cluster, top vocab terms on
+	 * the `c_i - c_j` axis. Keyed by the sibling's label.
+	 */
+	disambiguators?: Array<{ vs: string; terms: string[] }>;
+	size: number;
+	results: SearchResult[];
+}
+
+export interface FacetResult {
+	query: string;
+	clusters: FacetCluster[];
+}
+
+export interface FacetOptions {
+	limit?: number;
+	k?: number;
+	filePrefix?: string;
+}
+
+export interface FacetSessionResult {
+	sessionId: string;
+	path: string;
+	query: string;
+	labels: string[];
+	/** Parallel to `labels`: top-N vocab candidates per cluster (label first). */
+	candidates?: string[][];
+	/**
+	 * Parallel to `labels`: deduped pairwise qualifiers per cluster, used for
+	 * the default compact display as `<label>: q1, q2, q3`.
+	 */
+	qualifiers?: string[][];
+	/**
+	 * Parallel to `labels`: pairwise discriminators per cluster, where each
+	 * entry lists top vocab terms on the `c_i - c_j` axis against each sibling.
+	 */
+	disambiguators?: Array<Array<{ vs: string; terms: string[] }>>;
+}
+
+export interface FacetShowResult {
+	sessionId: string;
+	path: string;
+	query: string;
+	results: SearchResult[];
+}
+
 export interface SearchOptions {
 	limit?: number;
 	filePrefix?: string;

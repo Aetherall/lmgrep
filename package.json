@@ -8,7 +8,9 @@
     "lmgrep-mcp": "./dist/mcp.js"
   },
   "pi": {
-    "extensions": ["./pi-extension/index.ts"]
+    "extensions": [
+      "./pi-extension/index.ts"
+    ]
   },
   "scripts": {
     "build": "tsc",
@@ -45,6 +47,7 @@
     "commander": "^14.0.3",
     "glob": "^13.0.6",
     "ignore": "^7.0.5",
+    "stemmer": "^2.0.1",
     "tree-sitter-wasms": "^0.1.13",
     "web-tree-sitter": "^0.20.8",
     "yaml": "^2.8.3",

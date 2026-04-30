@@ -19,7 +19,7 @@
           pname = "lmgrep";
           version = "0.1.0";
           inherit src;
-          hash = "sha256-TcyFCnTthEIp085CApiGDgMUhW2VJ4vLe6/vhDp6iYU=";
+          hash = "sha256-u/XDNPilYhbT7ChhBG8lGn8Qk1NdkSscyiIX/owqIns=";
           fetcherVersion = 3;
         };
 

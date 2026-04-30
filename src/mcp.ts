@@ -50,6 +50,21 @@ const searchTool = server.tool(
 );
 
 server.tool(
+	"facet",
+	core.facetDescription,
+	{
+		query: z.string().describe(core.facetParam.description),
+	},
+	async (args) => {
+		const result = await core.executeFacet(args);
+		return {
+			content: [{ type: "text" as const, text: result.text }],
+			...(result.isError ? { isError: true } : {}),
+		};
+	},
+);
+
+server.tool(
 	"list_other_indexed_projects",
 	core.listProjectsDescription,
 	{},

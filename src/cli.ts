@@ -147,6 +147,205 @@ program
 		await index.close();
 	});
 
+{
+	const facet = program
+		.command("facet")
+		.description("Cluster search results into semantic facets");
+
+	facet
+		.command("index")
+		.description("Build the vocab table used for cluster labeling")
+		.option("--reset", "Drop and rebuild the vocab table")
+		.option(
+			"--min-df <n>",
+			"Min document frequency for a term to be embedded",
+			"10",
+		)
+		.action(async (opts) => {
+			const cwd = process.cwd();
+			const index = await createIndex({ cwd });
+			try {
+				const result = await index.facetIndex({
+					reset: opts.reset,
+					minDf: Number.parseInt(opts.minDf, 10),
+				});
+				console.log(
+					`Vocab: +${result.added} new terms (${result.total} total).`,
+				);
+			} finally {
+				await index.close();
+			}
+		});
+
+	facet
+		.command("search <query>")
+		.description("Run semantic search and print root facets + session id")
+		.option("-m, --limit <n>", "Max results to cluster", "25")
+		.option("-k, --k <n>", "Number of facets", "5")
+		.option("--file-prefix <prefix>", "Only search files matching this path prefix")
+		.option("--json", "Output as JSON")
+		.option("-v, --verbose", "Show top vocab candidates per cluster")
+		.action(async (query, opts) => {
+			const cwd = process.cwd();
+			const index = await createIndex({ cwd });
+			const result = await index.facetSearch(query, {
+				limit: Number.parseInt(opts.limit, 10),
+				k: Number.parseInt(opts.k, 10),
+				filePrefix: opts.filePrefix,
+			});
+			if (opts.json) {
+				console.log(JSON.stringify(result, null, 2));
+			} else if (result.labels.length === 0) {
+				console.log("No results found.");
+			} else if (opts.verbose) {
+				console.log(result.sessionId);
+				printCandidates(
+					result.labels,
+					result.candidates,
+					result.disambiguators,
+				);
+			} else {
+				console.log(result.sessionId);
+				printQualified(result.labels, result.qualifiers);
+			}
+			await index.close();
+		});
+
+	facet
+		.command("list <path>")
+		.description("Print the facet list at a node (e.g. kx3 or kx3/token)")
+		.option("--json", "Output as JSON")
+		.option("-v, --verbose", "Show top vocab candidates per cluster")
+		.action(async (path, opts) => {
+			const cwd = process.cwd();
+			const index = await createIndex({ cwd });
+			try {
+				const result = await index.facetList(path);
+				if (opts.json) {
+					console.log(JSON.stringify(result, null, 2));
+				} else if (opts.verbose) {
+					printCandidates(
+					result.labels,
+					result.candidates,
+					result.disambiguators,
+				);
+				} else {
+					printQualified(result.labels, result.qualifiers);
+				}
+			} catch (err) {
+				console.error((err as Error).message);
+				process.exitCode = 1;
+			} finally {
+				await index.close();
+			}
+		});
+
+	facet
+		.command("show <path>")
+		.description("Print the result chunks at a node")
+		.option("--json", "Output as JSON")
+		.option("--compact", "Show file paths only")
+		.action(async (path, opts) => {
+			const cwd = process.cwd();
+			const index = await createIndex({ cwd });
+			try {
+				const result = await index.facetShow(path);
+				if (opts.json) {
+					console.log(JSON.stringify(result, null, 2));
+				} else if (result.results.length === 0) {
+					console.log("(empty)");
+				} else if (opts.compact) {
+					const seen = new Set<string>();
+					for (const r of result.results) {
+						if (!seen.has(r.filePath)) {
+							seen.add(r.filePath);
+							console.log(r.filePath);
+						}
+					}
+				} else {
+					for (const r of result.results) {
+						console.log(`\n${"─".repeat(60)}`);
+						console.log(
+							`${r.filePath}:${r.startLine}-${r.endLine} [${r.type}] ${r.name}`,
+						);
+						console.log(`${"─".repeat(60)}`);
+						console.log(r.context);
+						console.log();
+						console.log(r.content);
+					}
+				}
+			} catch (err) {
+				console.error((err as Error).message);
+				process.exitCode = 1;
+			} finally {
+				await index.close();
+			}
+		});
+
+	facet
+		.command("refine <path>")
+		.description("Compute child facets for the pool at a node")
+		.option("-k, --k <n>", "Number of facets", "5")
+		.option("--json", "Output as JSON")
+		.option("-v, --verbose", "Show top vocab candidates per cluster")
+		.action(async (path, opts) => {
+			const cwd = process.cwd();
+			const index = await createIndex({ cwd });
+			try {
+				const result = await index.facetRefine(path, {
+					k: Number.parseInt(opts.k, 10),
+				});
+				if (opts.json) {
+					console.log(JSON.stringify(result, null, 2));
+				} else if (result.labels.length === 0) {
+					console.log("(nothing to refine)");
+				} else if (opts.verbose) {
+					printCandidates(
+					result.labels,
+					result.candidates,
+					result.disambiguators,
+				);
+				} else {
+					printQualified(result.labels, result.qualifiers);
+				}
+			} catch (err) {
+				console.error((err as Error).message);
+				process.exitCode = 1;
+			} finally {
+				await index.close();
+			}
+		});
+}
+
+function printQualified(labels: string[], qualifiers?: string[][]) {
+	for (let i = 0; i < labels.length; i++) {
+		const q = qualifiers?.[i] ?? [];
+		if (q.length === 0) {
+			console.log(`  ${labels[i]}`);
+		} else {
+			console.log(`  ${labels[i]}: ${q.join(", ")}`);
+		}
+	}
+}
+
+function printCandidates(
+	labels: string[],
+	candidates?: string[][],
+	disambiguators?: Array<Array<{ vs: string; terms: string[] }>>,
+) {
+	for (let i = 0; i < labels.length; i++) {
+		const cands = candidates?.[i] ?? [labels[i]];
+		const [head, ...rest] = cands;
+		const alts = rest.length > 0 ? ` (${rest.join(", ")})` : "";
+		console.log(`  ${head}${alts}`);
+		const rows = disambiguators?.[i] ?? [];
+		for (const row of rows) {
+			const terms = row.terms.join(", ");
+			console.log(`    vs ${row.vs}: ${terms}`);
+		}
+	}
+}
+
 program
 	.command("status")
 	.description("Show index stats and check embedding connectivity")

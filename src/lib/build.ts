@@ -6,6 +6,7 @@ import {
 } from "./embedder.js";
 import { walkFiles, detectChanges, filterByMtime } from "./scanner.js";
 import { type Store, writeProjectMetadata } from "./store.js";
+import { tokenize } from "./vocab.js";
 import type {
 	Chunk,
 	Chunker,
@@ -325,6 +326,18 @@ export async function build(
 		);
 	}
 
+	// Build vocab table for faceting on full rebuilds. Incremental builds skip
+	// this because df computed on a delta is meaningless — run `lmgrep facet
+	// index` to (re)build the vocab from all existing chunks.
+	if (opts.reset && indexed.length > 0) {
+		await buildVocab(
+			store,
+			indexed.map((c) => ({ name: c.name, content: c.content })),
+			embedder,
+			log,
+		);
+	}
+
 	// Update project metadata (preserve original model/dimensions as baseline)
 	writeProjectMetadata(cwd, {
 		model: config.model,
@@ -335,6 +348,58 @@ export async function build(
 	await sweepStaleBranches(cwd, store, logger);
 
 	return { succeeded, failed };
+}
+
+/**
+ * Extract vocab terms from newly indexed chunks, embed those not already
+ * present in the vocab table, and append the new entries. Keeps the vocab
+ * table in sync with the chunk content incrementally.
+ */
+export async function buildVocab(
+	store: Store,
+	chunks: Iterable<{ name: string; content: string }>,
+	embedder: Embedder,
+	log: (msg: string) => void,
+	opts: { minDf?: number; embedBatch?: number } = {},
+): Promise<{ added: number }> {
+	const minDf = opts.minDf ?? 10;
+	const embedBatch = opts.embedBatch ?? 200;
+
+	// Collect document-frequency across chunks
+	const df = new Map<string, number>();
+	for (const c of chunks) {
+		const seen = new Set<string>();
+		for (const t of tokenize(`${c.name} ${c.content}`)) {
+			if (!seen.has(t)) {
+				df.set(t, (df.get(t) ?? 0) + 1);
+				seen.add(t);
+			}
+		}
+	}
+	if (df.size === 0) return { added: 0 };
+
+	// Keep terms that appear in enough chunks to cut noise
+	const candidates: string[] = [];
+	for (const [term, count] of df) {
+		if (count >= minDf) candidates.push(term);
+	}
+	if (candidates.length === 0) return { added: 0 };
+
+	const known = await store.getVocabTerms();
+	const toEmbed = candidates.filter((t) => !known.has(t));
+	if (toEmbed.length === 0) return { added: 0 };
+
+	log(`Embedding ${toEmbed.length} new vocab terms...`);
+	let added = 0;
+	for (let i = 0; i < toEmbed.length; i += embedBatch) {
+		const batch = toEmbed.slice(i, i + embedBatch);
+		const vectors = await embedder.embed(batch);
+		const entries = batch.map((term, j) => ({ term, vector: vectors[j] }));
+		await store.addVocab(entries);
+		added += entries.length;
+		log(`Vocab: ${added}/${toEmbed.length}`);
+	}
+	return { added };
 }
 
 async function sweepStaleBranches(

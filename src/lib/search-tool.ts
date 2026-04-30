@@ -80,15 +80,40 @@ export const listProjectsDescription =
 	"Use this to discover what projects are available for cross-project search " +
 	"via the `project` parameter on the search tool.";
 
+export interface FacetArgs {
+	query: string;
+}
+
+export const facetDescription = [
+	"**Get a labeled overview of what *kinds* of code match a query, instead of raw results.** Returns 5 clusters, each with a one-word label, a handful of qualifier words describing that cluster's angle, and a size. No file paths, no chunks — just the shape of the result space.",
+	"",
+	"**Use facet when:**",
+	"- The query is broad or exploratory (`auth`, `error handling`, `payment flow`).",
+	"- You don't yet know the vocabulary the codebase uses for a concept — the qualifiers surface the real terms (e.g. `auth` → clusters revealing `fireauth`, `oauth`, `serviceaccount`).",
+	"- A previous `search` returned a heterogeneous mix and you want to see why.",
+	"",
+	"**Do NOT use facet when:** the query is already specific (a symbol, a precise question, an error message). Call `search` directly.",
+	"",
+	"**How to act on the output:** pick the cluster that matches your intent, then call `search` with a narrower query that combines the original intent with the cluster's label + qualifiers (e.g. after `facet(\"auth\")` returns a cluster `email: fireauth, phone, provider`, call `search(\"authentication with fireauth phone provider\")`). This uses the corpus's own vocabulary and dramatically improves recall.",
+].join("\n");
+
+export const facetParamSpec: ParamSpec = {
+	description:
+		"Broad, natural-language query to faceted over. Same phrasing as `search`, but use when the query is exploratory and you want to see the categories of matching code.",
+};
+
 export interface LmgrepCore {
 	readonly cwd: string;
 	readonly searchParams: SearchParamSpecs;
+	readonly facetParam: ParamSpec;
+	readonly facetDescription: string;
 	readonly listProjectsDescription: string;
 	buildSearchDescription(): string;
 	currentHealth(): HealthState;
 	onHealthChange(cb: (state: HealthState) => void): () => void;
 	startHealthLoop(): void;
 	executeSearch(args: SearchArgs): Promise<ToolResult>;
+	executeFacet(args: FacetArgs): Promise<ToolResult>;
 	executeListProjects(): Promise<ToolResult>;
 	dispose(): Promise<void>;
 }
@@ -285,6 +310,39 @@ export async function createLmgrepCore(opts: {
 		}
 	}
 
+	async function executeFacet(args: FacetArgs): Promise<ToolResult> {
+		if (state.reason === "embedding_failed") {
+			return {
+				text: "lmgrep is unavailable: the embedding provider is unreachable. Ask the user to check their lmgrep configuration (`lmgrep status`) before retrying.",
+				isError: true,
+			};
+		}
+		try {
+			const result = await index.facetSearch(args.query, {});
+			markHealthy();
+			stopHealthLoop();
+
+			if (result.labels.length === 0) {
+				return { text: "No results found." };
+			}
+
+			const total = result.labels.length;
+			const header = `Facets for "${args.query}" (${total} clusters):`;
+			const lines = result.labels.map((label, i) => {
+				const quals = result.qualifiers?.[i] ?? [];
+				const qualText = quals.length > 0 ? `: ${quals.join(", ")}` : "";
+				return `- ${label}${qualText}`;
+			});
+			const footer =
+				"\nPick a cluster and call `search` with a refined query that combines your original intent with the label + qualifiers to drill in.";
+			return { text: [header, ...lines, footer].join("\n") };
+		} catch (err) {
+			startHealthLoop();
+			const msg = err instanceof Error ? err.message : String(err);
+			return { text: `Error: ${msg}`, isError: true };
+		}
+	}
+
 	async function executeListProjects(): Promise<ToolResult> {
 		const others = getOtherProjects();
 		if (others.length === 0) {
@@ -310,6 +368,8 @@ export async function createLmgrepCore(opts: {
 	return {
 		cwd,
 		searchParams: searchParamSpecs,
+		facetParam: facetParamSpec,
+		facetDescription,
 		listProjectsDescription,
 		buildSearchDescription,
 		currentHealth: () => state,
@@ -319,6 +379,7 @@ export async function createLmgrepCore(opts: {
 		},
 		startHealthLoop,
 		executeSearch,
+		executeFacet,
 		executeListProjects,
 		dispose,
 	};

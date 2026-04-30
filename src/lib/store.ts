@@ -16,6 +16,7 @@ import type { IndexedChunk, SearchResult } from "./types.js";
 
 const CHUNKS_TABLE = "chunks";
 const FILES_TABLE = "files";
+const VOCAB_TABLE = "vocab";
 const DELETE_BATCH_SIZE = 50;
 
 function buildInFilter(column: string, values: string[]): string {
@@ -421,6 +422,7 @@ export class Store {
 	private db: Connection | undefined;
 	private chunksTable: Table | undefined;
 	private filesTable: Table | undefined;
+	private vocabTable: Table | undefined;
 
 	constructor(
 		private readonly dbPath: string,
@@ -463,6 +465,107 @@ export class Store {
 			return this.filesTable;
 		}
 		return undefined;
+	}
+
+	// --- Vocab ---
+
+	private async openVocab(): Promise<Table | undefined> {
+		if (this.vocabTable) return this.vocabTable;
+		const conn = await this.connection();
+		const tables = await conn.tableNames();
+		if (tables.includes(VOCAB_TABLE)) {
+			this.vocabTable = await conn.openTable(VOCAB_TABLE);
+			return this.vocabTable;
+		}
+		return undefined;
+	}
+
+	async hasVocab(): Promise<boolean> {
+		return (await this.openVocab()) !== undefined;
+	}
+
+	/**
+	 * Return the set of vocab terms already embedded in the vocab table.
+	 * Used at index time to skip re-embedding.
+	 */
+	async getVocabTerms(): Promise<Set<string>> {
+		const t = await this.openVocab();
+		if (!t) return new Set();
+		const rows = await t.query().select(["term"]).toArray();
+		return new Set(rows.map((r) => r.term as string));
+	}
+
+	async addVocab(
+		entries: Array<{ term: string; vector: number[] }>,
+	): Promise<void> {
+		if (entries.length === 0) return;
+
+		// Dedup within the batch
+		const seen = new Set<string>();
+		const batchUnique: Array<{ term: string; vector: number[] }> = [];
+		for (const e of entries) {
+			if (seen.has(e.term)) continue;
+			seen.add(e.term);
+			batchUnique.push(e);
+		}
+
+		// Skip terms already in the table
+		const known = await this.getVocabTerms();
+		const records = batchUnique
+			.filter((e) => !known.has(e.term))
+			.map((e) => ({ term: e.term, vector: e.vector }));
+		if (records.length === 0) return;
+
+		const conn = await this.connection();
+		const tables = await conn.tableNames();
+		if (tables.includes(VOCAB_TABLE)) {
+			const t = await conn.openTable(VOCAB_TABLE);
+			this.vocabTable = t;
+			await t.add(records);
+		} else {
+			this.vocabTable = await conn.createTable(VOCAB_TABLE, records);
+		}
+	}
+
+	/**
+	 * ANN search against the vocab table. Returns top-N terms closest to the
+	 * given vector by cosine distance.
+	 */
+	async searchVocab(
+		vector: number[],
+		limit: number,
+		excludeTerms?: Set<string>,
+	): Promise<Array<{ term: string; score: number }>> {
+		const t = await this.openVocab();
+		if (!t) return [];
+		const fetch = excludeTerms ? limit + excludeTerms.size : limit;
+		const rows = await t.search(vector).limit(fetch).toArray();
+		const out: Array<{ term: string; score: number }> = [];
+		for (const r of rows) {
+			const term = r.term as string;
+			if (excludeTerms?.has(term)) continue;
+			out.push({
+				term,
+				score: r._distance != null ? 1 - (r._distance as number) : 0,
+			});
+			if (out.length >= limit) break;
+		}
+		return out;
+	}
+
+	async vocabCount(): Promise<number> {
+		const t = await this.openVocab();
+		if (!t) return 0;
+		return t.countRows();
+	}
+
+	async dropVocab(): Promise<void> {
+		const conn = await this.connection();
+		const tables = await conn.tableNames();
+		if (tables.includes(VOCAB_TABLE)) {
+			await conn.dropTable(VOCAB_TABLE);
+		}
+		this.vocabTable = undefined;
 	}
 
 	// --- Chunks ---
@@ -612,6 +715,75 @@ export class Store {
 		return mapped.slice(0, limit);
 	}
 
+	/**
+	 * Same as search() but also returns each chunk's vector — needed for
+	 * client-side clustering (facet command).
+	 */
+	async searchWithVectors(
+		queryVector: number[],
+		limit = 25,
+		filePrefix?: string,
+		scopeToBranch = true,
+	): Promise<Array<SearchResult & { id: string; vector: number[] }>> {
+		const t = await this.openChunks();
+		if (!t) {
+			throw new Error("No index found. Run `lmgrep index` first.");
+		}
+		const branchFiles = scopeToBranch ? await this.getBranchFiles() : undefined;
+		const fetchLimit = branchFiles ? limit * 3 : limit;
+		let query = t.search(queryVector).limit(fetchLimit);
+		if (filePrefix) {
+			query = query.where(
+				`filePath LIKE '${filePrefix.replace(/'/g, "''")}%'`,
+			);
+		}
+		const results = await query.toArray();
+
+		let mapped = results.map((r) => ({
+			id: r.id as string,
+			filePath: r.filePath as string,
+			startLine: r.startLine as number,
+			endLine: r.endLine as number,
+			type: r.type as string,
+			name: r.name as string,
+			content: r.content as string,
+			context: r.context as string,
+			score: r._distance != null ? 1 - (r._distance as number) : 0,
+			vector: Array.from(r.vector as Iterable<number>),
+		}));
+
+		if (branchFiles) {
+			mapped = mapped.filter((r) => branchFiles.has(r.filePath));
+		}
+		return mapped.slice(0, limit);
+	}
+
+	/**
+	 * Fetch chunks (with vectors) by id. Used to rehydrate faceting sessions.
+	 * Missing ids are silently dropped.
+	 */
+	async getChunksByIds(
+		ids: string[],
+	): Promise<Array<SearchResult & { id: string; vector: number[] }>> {
+		if (ids.length === 0) return [];
+		const t = await this.openChunks();
+		if (!t) return [];
+		const escaped = ids.map((i) => `'${i.replace(/'/g, "''")}'`).join(",");
+		const rows = await t.query().where(`id IN (${escaped})`).toArray();
+		return rows.map((r) => ({
+			id: r.id as string,
+			filePath: r.filePath as string,
+			startLine: r.startLine as number,
+			endLine: r.endLine as number,
+			type: r.type as string,
+			name: r.name as string,
+			content: r.content as string,
+			context: r.context as string,
+			score: 0,
+			vector: Array.from(r.vector as Iterable<number>),
+		}));
+	}
+
 	async getIndexedFiles(): Promise<Map<string, string[]>> {
 		const t = await this.openChunks();
 		if (!t) return new Map();
@@ -665,6 +837,27 @@ export class Store {
 		const t = await this.openChunks();
 		if (!t) return 0;
 		return await t.countRows();
+	}
+
+	/**
+	 * Stream chunk texts (name + content only) in batches. Used by vocab
+	 * backfill to avoid loading all chunks into memory at once.
+	 */
+	async *streamChunkTexts(
+		batchSize = 1000,
+	): AsyncIterable<Array<{ name: string; content: string }>> {
+		const t = await this.openChunks();
+		if (!t) return;
+		const stream = await t
+			.query()
+			.select(["name", "content"])
+			.toArray();
+		for (let i = 0; i < stream.length; i += batchSize) {
+			yield stream.slice(i, i + batchSize).map((r) => ({
+				name: (r.name as string) ?? "",
+				content: (r.content as string) ?? "",
+			}));
+		}
 	}
 
 	// --- File hashes (change detection) ---
@@ -806,8 +999,10 @@ export class Store {
 		const tables = await conn.tableNames();
 		if (tables.includes(CHUNKS_TABLE)) await conn.dropTable(CHUNKS_TABLE);
 		if (tables.includes(FILES_TABLE)) await conn.dropTable(FILES_TABLE);
+		if (tables.includes(VOCAB_TABLE)) await conn.dropTable(VOCAB_TABLE);
 		this.chunksTable = undefined;
 		this.filesTable = undefined;
+		this.vocabTable = undefined;
 	}
 
 	async compact(): Promise<void> {
@@ -815,6 +1010,8 @@ export class Store {
 		if (t) await t.optimize();
 		const f = await this.openFiles();
 		if (f) await f.optimize();
+		const v = await this.openVocab();
+		if (v) await v.optimize();
 	}
 
 	/**
@@ -934,6 +1131,7 @@ export class Store {
 	async close(): Promise<void> {
 		this.chunksTable = undefined;
 		this.filesTable = undefined;
+		this.vocabTable = undefined;
 		this.db = undefined;
 	}
 }
