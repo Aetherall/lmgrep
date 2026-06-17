@@ -42,6 +42,14 @@ export interface Chunk {
 	content: string;
 	context: string;
 	hash: string;
+	/**
+	 * Content hash of the source file this chunk came from (matches the value
+	 * stored in the files manifest). Lets search scope to the exact file
+	 * version a branch references, so stale chunks from other versions of the
+	 * same path don't leak into results. Stamped by build() from the manifest
+	 * hash; legacy rows (pre this column) carry "" and are treated as wildcard.
+	 */
+	fileHash?: string;
 }
 
 export interface IndexedChunk extends Chunk {

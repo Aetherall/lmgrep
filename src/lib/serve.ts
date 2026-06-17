@@ -15,6 +15,13 @@ import { consoleLogger } from "./types.js";
 
 export { isDbLocked as isServeLocked };
 
+// fs.watch (recursive) silently misses events on Linux — new subdirectories,
+// editor atomic-saves, bursts. A periodic incremental reconcile is a cheap
+// backstop: when nothing changed, build() returns before embedding (so it does
+// not ping the embedder), and it also retries files that failed while the
+// embedder was down. This removes the need to run `lmgrep index` in a loop.
+const RECONCILE_MS = 30_000;
+
 // --- Serve ---
 
 export async function serve(
@@ -104,6 +111,11 @@ export async function serve(
 		runIndex(changedFiles);
 	}, 2000, config.extensions);
 
+	// Periodic full reconcile backstop for events fs.watch missed.
+	setInterval(() => {
+		void runIndex();
+	}, RECONCILE_MS);
+
 	log("Watching for changes...");
 }
 
@@ -182,9 +194,17 @@ export function startWatcher(
 		config.extensions,
 	);
 
+	// Periodic full reconcile backstop for events fs.watch missed. unref() so
+	// it never keeps the host process alive on its own.
+	const reconcileTimer = setInterval(() => {
+		void runIndex();
+	}, RECONCILE_MS);
+	reconcileTimer.unref?.();
+
 	log("Watching for changes...");
 
 	return () => {
+		clearInterval(reconcileTimer);
 		watcher.close();
 		releaseDbLock(cwd);
 	};

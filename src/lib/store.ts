@@ -31,6 +31,50 @@ async function batchDelete(table: Table, column: string, values: string[]): Prom
 	}
 }
 
+interface DedupableRow {
+	id: string;
+	filePath: string;
+	startLine: number;
+	endLine: number;
+}
+
+/**
+ * Remove redundant search rows. Two passes, assuming `rows` is already in
+ * best-first order (ANN returns ascending distance = descending score):
+ *
+ *  1. Exact duplicates by chunk id — collapses identical rows produced by
+ *     concurrent unlocked indexing (same filePath:row:contentHash).
+ *  2. Overlapping line ranges within the same file — collapses the
+ *     fallback chunker's sliding-window overlap (and any parent/child or
+ *     near-duplicate spans), keeping the highest-scoring chunk of each
+ *     overlapping cluster. Tree-sitter chunks are node-bounded and don't
+ *     overlap, so this only ever drops genuine near-duplicates.
+ */
+function dedupeRows<T extends DedupableRow>(rows: T[]): T[] {
+	const seenIds = new Set<string>();
+	const keptRanges = new Map<string, Array<[number, number]>>();
+	const out: T[] = [];
+
+	for (const r of rows) {
+		if (seenIds.has(r.id)) continue;
+		seenIds.add(r.id);
+
+		const ranges = keptRanges.get(r.filePath);
+		if (ranges) {
+			const overlaps = ranges.some(
+				([s, e]) => r.startLine <= e && s <= r.endLine,
+			);
+			if (overlaps) continue;
+			ranges.push([r.startLine, r.endLine]);
+		} else {
+			keptRanges.set(r.filePath, [[r.startLine, r.endLine]]);
+		}
+		out.push(r);
+	}
+
+	return out;
+}
+
 /**
  * Legacy indexes (pre branch-scoping) have a `files` table without a `branch`
  * column. Detect and backfill it with the current branch so queries that filter
@@ -42,6 +86,20 @@ async function migrateBranchColumn(table: Table, currentBranch: string): Promise
 	const escaped = currentBranch.replace(/'/g, "''");
 	await table.addColumns([
 		{ name: "branch", valueSql: `CAST('${escaped}' AS STRING)` },
+	]);
+}
+
+/**
+ * Legacy chunk tables (pre version-scoping) have no `fileHash` column. Backfill
+ * it with "" — the empty string is treated as a wildcard at search time so
+ * legacy chunks keep appearing until the file is re-indexed and gets a real
+ * file-version hash.
+ */
+async function migrateFileHashColumn(table: Table): Promise<void> {
+	const schema = await table.schema();
+	if (schema.fields.some((f) => f.name === "fileHash")) return;
+	await table.addColumns([
+		{ name: "fileHash", valueSql: `CAST('' AS STRING)` },
 	]);
 }
 
@@ -318,6 +376,77 @@ export function releaseDbLock(cwd: string): void {
 	} catch {}
 }
 
+// --- Per-build write mutex ---
+//
+// The `.lock` maintainer lock (above) is held for a watcher/serve process's
+// whole lifetime and doubles as a liveness registry for `lmgrep status`. It
+// cannot also serve as a write mutex, because then a one-shot `lmgrep index`
+// could never run while a watcher is up. This separate `.writelock` is a
+// short-lived mutex acquired around each build() so that the watcher and an
+// ad-hoc `lmgrep index` serialize their writes instead of racing into
+// duplicate rows. Named `.writelock` (not `.write.lock`) so it does not match
+// the `.lock` suffix scan in discoverRunningProcesses.
+
+function writeLockPath(cwd: string): string {
+	return `${getDbPath(cwd)}.writelock`;
+}
+
+function tryAcquireWriteLock(cwd: string): boolean {
+	const lockPath = writeLockPath(cwd);
+	if (existsSync(lockPath)) {
+		try {
+			const pid = Number.parseInt(readFileSync(lockPath, "utf-8").trim(), 10);
+			if (isProcessAlive(pid)) return false;
+		} catch {
+			// stale/corrupt lock, take over
+		}
+	}
+	mkdirSync(getDbPath(cwd), { recursive: true });
+	writeFileSync(lockPath, `${process.pid}\n`);
+	return true;
+}
+
+function releaseWriteLock(cwd: string): void {
+	const lockPath = writeLockPath(cwd);
+	try {
+		// Only remove the lock if we still own it.
+		const pid = Number.parseInt(readFileSync(lockPath, "utf-8").trim(), 10);
+		if (pid === process.pid) unlinkSync(lockPath);
+	} catch {}
+}
+
+/**
+ * Run `fn` while holding the project's write mutex, so concurrent indexers
+ * (a watcher plus an ad-hoc `lmgrep index`) can't write at the same time and
+ * produce duplicate chunk rows. Waits up to `waitMs` for a busy lock, taking
+ * over a lock held by a dead process. Throws if the lock can't be acquired in
+ * time.
+ */
+export async function withWriteLock<T>(
+	cwd: string,
+	fn: () => Promise<T>,
+	opts: { waitMs?: number; pollMs?: number } = {},
+): Promise<T> {
+	const waitMs = opts.waitMs ?? 120_000;
+	const pollMs = opts.pollMs ?? 200;
+	let waited = 0;
+	while (!tryAcquireWriteLock(cwd)) {
+		if (waited >= waitMs) {
+			throw new Error(
+				"Could not acquire the index write lock — another indexer is busy. " +
+					"Try again once it finishes.",
+			);
+		}
+		await new Promise((r) => setTimeout(r, pollMs));
+		waited += pollMs;
+	}
+	try {
+		return await fn();
+	} finally {
+		releaseWriteLock(cwd);
+	}
+}
+
 /**
  * Check if a write lock is held by a live process.
  */
@@ -448,7 +577,9 @@ export class Store {
 		const conn = await this.connection();
 		const tables = await conn.tableNames();
 		if (tables.includes(CHUNKS_TABLE)) {
-			this.chunksTable = await conn.openTable(CHUNKS_TABLE);
+			const t = await conn.openTable(CHUNKS_TABLE);
+			await migrateFileHashColumn(t);
+			this.chunksTable = t;
 			return this.chunksTable;
 		}
 		return undefined;
@@ -584,6 +715,7 @@ export class Store {
 			content: c.content,
 			context: c.context,
 			hash: c.hash,
+			fileHash: c.fileHash ?? "",
 			vector: c.vector,
 		}));
 
@@ -636,28 +768,34 @@ export class Store {
 		}
 	}
 
-	private branchFilesCache: Set<string> | undefined;
+	private branchVersionsCache: Map<string, string> | undefined;
 
 	/**
-	 * Get the set of file paths indexed on the current branch (cached).
+	 * Map of filePath -> file-version hash for the current branch (cached).
+	 * Used to scope search to the exact file versions this branch references,
+	 * so stale chunks from another version of the same path are excluded.
 	 */
-	async getBranchFiles(): Promise<Set<string> | undefined> {
-		if (this.branchFilesCache) return this.branchFilesCache;
+	async getBranchFileVersions(): Promise<Map<string, string> | undefined> {
+		if (this.branchVersionsCache) return this.branchVersionsCache;
 		const t = await this.openFiles();
 		if (!t) return undefined;
 		const escaped = this.branch.replace(/'/g, "''");
 		const rows = await t
 			.query()
 			.where(`branch = '${escaped}'`)
-			.select(["filePath"])
+			.select(["filePath", "fileHash"])
 			.toArray();
-		this.branchFilesCache = new Set(rows.map((r) => r.filePath as string));
-		return this.branchFilesCache;
+		const map = new Map<string, string>();
+		for (const r of rows) {
+			map.set(r.filePath as string, r.fileHash as string);
+		}
+		this.branchVersionsCache = map;
+		return this.branchVersionsCache;
 	}
 
 	/** Invalidate the branch files cache (call after index/import). */
 	invalidateBranchFilesCache(): void {
-		this.branchFilesCache = undefined;
+		this.branchVersionsCache = undefined;
 	}
 
 	async search(
@@ -673,10 +811,13 @@ export class Store {
 			throw new Error("No index found. Run `lmgrep index` first.");
 		}
 
-		const branchFiles = scopeToBranch ? await this.getBranchFiles() : undefined;
+		const branchVersions = scopeToBranch
+			? await this.getBranchFileVersions()
+			: undefined;
 
-		// Over-fetch when branch-filtering since some results will be discarded
-		const fetchLimit = branchFiles ? limit * 3 : limit;
+		// Over-fetch: branch/version filtering and dedup both discard rows, so
+		// pull extra to still return `limit` distinct results.
+		const fetchLimit = branchVersions ? limit * 3 : limit * 2;
 		let query = t.search(queryVector).limit(fetchLimit);
 
 		const conditions: string[] = [];
@@ -698,6 +839,7 @@ export class Store {
 		const results = await query.toArray();
 
 		let mapped = results.map((r) => ({
+			id: r.id as string,
 			filePath: r.filePath as string,
 			startLine: r.startLine as number,
 			endLine: r.endLine as number,
@@ -706,13 +848,20 @@ export class Store {
 			content: r.content as string,
 			context: r.context as string,
 			score: r._distance != null ? 1 - (r._distance as number) : 0,
+			fileHash: (r.fileHash as string) ?? "",
 		}));
 
-		if (branchFiles) {
-			mapped = mapped.filter((r) => branchFiles.has(r.filePath));
+		if (branchVersions) {
+			mapped = mapped.filter((r) => {
+				const want = branchVersions.get(r.filePath);
+				// "" fileHash = legacy chunk, treated as wildcard.
+				return want !== undefined && (r.fileHash === "" || r.fileHash === want);
+			});
 		}
 
-		return mapped.slice(0, limit);
+		return dedupeRows(mapped)
+			.slice(0, limit)
+			.map(({ id, fileHash, ...rest }) => rest);
 	}
 
 	/**
@@ -729,8 +878,10 @@ export class Store {
 		if (!t) {
 			throw new Error("No index found. Run `lmgrep index` first.");
 		}
-		const branchFiles = scopeToBranch ? await this.getBranchFiles() : undefined;
-		const fetchLimit = branchFiles ? limit * 3 : limit;
+		const branchVersions = scopeToBranch
+			? await this.getBranchFileVersions()
+			: undefined;
+		const fetchLimit = branchVersions ? limit * 3 : limit * 2;
 		let query = t.search(queryVector).limit(fetchLimit);
 		if (filePrefix) {
 			query = query.where(
@@ -749,13 +900,19 @@ export class Store {
 			content: r.content as string,
 			context: r.context as string,
 			score: r._distance != null ? 1 - (r._distance as number) : 0,
+			fileHash: (r.fileHash as string) ?? "",
 			vector: Array.from(r.vector as Iterable<number>),
 		}));
 
-		if (branchFiles) {
-			mapped = mapped.filter((r) => branchFiles.has(r.filePath));
+		if (branchVersions) {
+			mapped = mapped.filter((r) => {
+				const want = branchVersions.get(r.filePath);
+				return want !== undefined && (r.fileHash === "" || r.fileHash === want);
+			});
 		}
-		return mapped.slice(0, limit);
+		return dedupeRows(mapped)
+			.slice(0, limit)
+			.map(({ fileHash, ...rest }) => rest);
 	}
 
 	/**
@@ -976,9 +1133,90 @@ export class Store {
 				content: r.content,
 				context: r.context,
 				hash: r.hash,
+				fileHash: (r.fileHash as string) ?? "",
 				vector: Array.from(r.vector as Iterable<number>),
 			}));
 		}
+	}
+
+	/**
+	 * Remove redundant rows from the chunks table:
+	 *  - exact duplicate ids (identical rows from concurrent unlocked indexing)
+	 *  - orphaned versions: chunks whose fileHash is no longer referenced by any
+	 *    branch's manifest (left behind when a file was edited on one branch
+	 *    while another branch still pointed at the old path). Legacy chunks with
+	 *    an empty fileHash are kept.
+	 * Rewrites the table from the surviving rows. Loads chunks into memory in
+	 * batches, so this is a maintenance operation, not a hot path.
+	 */
+	async dedupeChunks(): Promise<{
+		before: number;
+		after: number;
+		duplicateIds: number;
+		staleVersions: number;
+	}> {
+		const t = await this.openChunks();
+		if (!t) return { before: 0, after: 0, duplicateIds: 0, staleVersions: 0 };
+		const before = await t.countRows();
+
+		// Which (filePath, fileHash) pairs any branch still references.
+		const refs = new Map<string, Set<string>>();
+		for (const e of await this.getAllFileEntries()) {
+			const set = refs.get(e.filePath) ?? new Set<string>();
+			set.add(e.fileHash);
+			refs.set(e.filePath, set);
+		}
+
+		const kept: IndexedChunk[] = [];
+		const seenIds = new Set<string>();
+		let duplicateIds = 0;
+		let staleVersions = 0;
+
+		for await (const batch of this.streamAllChunks(2000)) {
+			for (const r of batch) {
+				const id = r.id as string;
+				if (seenIds.has(id)) {
+					duplicateIds++;
+					continue;
+				}
+				seenIds.add(id);
+
+				const filePath = r.filePath as string;
+				const fileHash = (r.fileHash as string) ?? "";
+				if (fileHash !== "" && !refs.get(filePath)?.has(fileHash)) {
+					staleVersions++;
+					continue;
+				}
+
+				kept.push({
+					id,
+					filePath,
+					startLine: r.startLine as number,
+					endLine: r.endLine as number,
+					type: r.type as string,
+					name: r.name as string,
+					content: r.content as string,
+					context: r.context as string,
+					hash: r.hash as string,
+					fileHash,
+					vector: r.vector as number[],
+				});
+			}
+		}
+
+		if (duplicateIds + staleVersions === 0) {
+			return { before, after: before, duplicateIds, staleVersions };
+		}
+
+		// Rewrite the table from the survivors.
+		const conn = await this.connection();
+		if ((await conn.tableNames()).includes(CHUNKS_TABLE)) {
+			await conn.dropTable(CHUNKS_TABLE);
+		}
+		this.chunksTable = undefined;
+		if (kept.length > 0) await this.addChunks(kept);
+
+		return { before, after: kept.length, duplicateIds, staleVersions };
 	}
 
 	async getAllFileEntries(): Promise<
@@ -1042,6 +1280,7 @@ export class Store {
 					content: r.content,
 					context: r.context,
 					hash: r.hash,
+					fileHash: (r.fileHash as string) ?? "",
 					vector: Array.from(r.vector as Iterable<number>),
 				}));
 				const conn = await this.connection();

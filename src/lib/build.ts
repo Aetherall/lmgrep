@@ -5,7 +5,7 @@ import {
 	EmbeddingAbortError,
 } from "./embedder.js";
 import { walkFiles, detectChanges, filterByMtime } from "./scanner.js";
-import { type Store, writeProjectMetadata } from "./store.js";
+import { type Store, withWriteLock, writeProjectMetadata } from "./store.js";
 import { tokenize } from "./vocab.js";
 import type {
 	Chunk,
@@ -47,6 +47,22 @@ function parseDuration(s: string): number {
 }
 
 export async function build(
+	cwd: string,
+	store: Store,
+	config: LmgrepConfig,
+	embedder: Embedder,
+	chunker: Chunker,
+	opts: BuildOptions = {},
+	logger: Logger = consoleLogger,
+): Promise<{ succeeded: number; failed: number }> {
+	// Serialize writes across processes (the watcher plus any ad-hoc
+	// `lmgrep index`) so concurrent indexers can't race into duplicate rows.
+	return withWriteLock(cwd, () =>
+		buildLocked(cwd, store, config, embedder, chunker, opts, logger),
+	);
+}
+
+async function buildLocked(
 	cwd: string,
 	store: Store,
 	config: LmgrepConfig,
@@ -165,11 +181,16 @@ export async function build(
 
 	// 3. Chunk changed files
 	const changedPaths = trulyChanged.map((f) => f.path);
+	// Stamp each chunk with its source file's version hash so search can scope
+	// to the exact version a branch references (drops stale-version chunks).
+	const pathFileHash = new Map(trulyChanged.map((f) => [f.path, f.hash]));
 	const allChunks: Chunk[] = [];
 
 	for (let i = 0; i < changedPaths.length; i++) {
 		try {
 			const chunks = await chunker.chunk(changedPaths[i], cwd);
+			const fileHash = pathFileHash.get(changedPaths[i]);
+			for (const c of chunks) c.fileHash = fileHash;
 			allChunks.push(...chunks);
 		} catch {
 			// skip files that fail to parse

@@ -30,6 +30,7 @@ import {
 	extractModelFamily,
 	discoverIndexedProjects,
 	discoverRunningProcesses,
+	withWriteLock,
 } from "./lib/store.js";
 
 const program = new Command();
@@ -811,11 +812,23 @@ program
 
 program
 	.command("compact")
-	.description("Compact the index to reclaim disk space")
+	.description("Remove duplicate/stale chunks and compact the index to reclaim disk space")
 	.action(async () => {
 		const cwd = process.cwd();
 		const store = Store.forProject(cwd);
-		await store.compact();
+		// Hold the write mutex so the cleanup's table rewrite can't race a
+		// concurrent indexer (watcher or `lmgrep index`).
+		await withWriteLock(cwd, async () => {
+			const r = await store.dedupeChunks();
+			if (r.duplicateIds + r.staleVersions > 0) {
+				console.log(
+					`Removed ${r.duplicateIds} duplicate and ${r.staleVersions} stale chunks (${r.before} → ${r.after}).`,
+				);
+			} else {
+				console.log("No duplicate or stale chunks found.");
+			}
+			await store.compact();
+		});
 		console.log("Compaction complete.");
 		await store.close();
 	});
