@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import Parser from "web-tree-sitter";
+import { Language, Parser, type Node } from "web-tree-sitter";
 import type { Chunk, Chunker } from "../types.js";
 import {
 	buildContextString,
@@ -18,7 +18,7 @@ import {
 const MAX_CHUNK_TOKENS = 8192;
 
 let parserInstance: Parser | undefined;
-const loadedLanguages = new Map<string, Parser.Language>();
+const loadedLanguages = new Map<string, Language>();
 
 async function getParser(): Promise<Parser> {
 	if (!parserInstance) {
@@ -30,14 +30,14 @@ async function getParser(): Promise<Parser> {
 
 async function getLanguage(
 	langConfig: LanguageConfig,
-): Promise<Parser.Language | undefined> {
+): Promise<Language | undefined> {
 	const cached = loadedLanguages.get(langConfig.id);
 	if (cached) return cached;
 
 	const wasmPath = getWasmPath(langConfig);
 	if (!wasmPath) return undefined;
 
-	const lang = await Parser.Language.load(wasmPath);
+	const lang = await Language.load(wasmPath);
 	loadedLanguages.set(langConfig.id, lang);
 	return lang;
 }
@@ -61,6 +61,11 @@ export async function chunkFile(
 	const tree = parser.parse(source);
 	if (!tree) return fallbackChunk(filePath, cwd);
 
+	if (langConfig.id === "markdown") {
+		const md = markdownChunks(tree.rootNode, filePath, source);
+		return md.length > 0 ? md : fallbackChunk(filePath, cwd);
+	}
+
 	const chunks: Chunk[] = [];
 	collectChunks(tree.rootNode, langConfig, filePath, source, chunks);
 
@@ -71,8 +76,60 @@ export async function chunkFile(
 	return chunks;
 }
 
+/**
+ * Markdown-specific chunking. The block grammar's `section` nodes nest by
+ * heading level, so emitting them whole collapses a doc into one chunk. Instead
+ * we split at every heading the grammar reports (so a `#` inside a fenced code
+ * block isn't mistaken for one) — each chunk spans a heading and its body up to
+ * the next heading. Result: complete, non-overlapping, heading-granular chunks.
+ */
+function markdownChunks(root: Node, filePath: string, source: string): Chunk[] {
+	const lines = source.split("\n");
+
+	const headingRows: number[] = [];
+	const visit = (node: Node): void => {
+		if (node.type === "atx_heading" || node.type === "setext_heading") {
+			headingRows.push(node.startPosition.row);
+		}
+		for (const child of node.children) visit(child);
+	};
+	visit(root);
+
+	// Split points: start of file plus each heading row, sorted and deduped.
+	const starts = [...new Set([0, ...headingRows])].sort((a, b) => a - b);
+	const chunks: Chunk[] = [];
+
+	for (let i = 0; i < starts.length; i++) {
+		const start = starts[i];
+		const end = i + 1 < starts.length ? starts[i + 1] : lines.length;
+		const content = lines.slice(start, end).join("\n");
+		if (content.trim().length === 0) continue;
+
+		const headingText = (lines[start] ?? "").replace(/^\s*#+\s*/, "").trim();
+		const name = headingText.slice(0, 80) || `lines_${start + 1}_${end}`;
+		const hash = createHash("sha256")
+			.update(content)
+			.digest("hex")
+			.slice(0, 16);
+
+		chunks.push({
+			id: `${filePath}:${start}:${hash}`,
+			filePath,
+			startLine: start + 1,
+			endLine: end,
+			type: "section",
+			name,
+			content,
+			context: `[file: ${filePath}]`,
+			hash,
+		});
+	}
+
+	return chunks;
+}
+
 function collectChunks(
-	node: Parser.SyntaxNode,
+	node: Node,
 	langConfig: LanguageConfig,
 	filePath: string,
 	source: string,
@@ -137,7 +194,7 @@ function collectChunks(
 }
 
 function hasChunkableDescendants(
-	node: Parser.SyntaxNode,
+	node: Node,
 	langConfig: LanguageConfig,
 ): boolean {
 	for (const child of node.children) {
@@ -147,12 +204,15 @@ function hasChunkableDescendants(
 	return false;
 }
 
-function extractNodeName(node: Parser.SyntaxNode): string | undefined {
+function extractNodeName(node: Node): string | undefined {
 	const nameNode =
 		node.childForFieldName("name") ??
 		node.children.find(
-			(c: Parser.SyntaxNode) =>
-				c.type === "identifier" || c.type === "type_identifier",
+			(c: Node) =>
+				c.type === "identifier" ||
+				c.type === "type_identifier" ||
+				// nix bindings name their target via an attrpath (e.g. `outputs = ...`)
+				c.type === "attrpath",
 		);
 	return nameNode?.text;
 }

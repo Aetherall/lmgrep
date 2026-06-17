@@ -1,4 +1,4 @@
-import type Parser from "web-tree-sitter";
+import type { Node } from "web-tree-sitter";
 import type { LanguageConfig } from "./languages.js";
 
 export type StructuralRole = "definition" | "orchestration" | "implementation";
@@ -74,7 +74,7 @@ const ORCHESTRATION_TYPES = new Set([
 
 /** Walk up from a node to collect typed parent scopes */
 export function extractScope(
-	node: Parser.SyntaxNode,
+	node: Node,
 	langConfig: LanguageConfig,
 ): ScopeEntry[] {
 	const scopes: ScopeEntry[] = [];
@@ -94,7 +94,7 @@ export function extractScope(
 
 /** Extract leading comments and decorators immediately before a node */
 export function extractLeadingComment(
-	node: Parser.SyntaxNode,
+	node: Node,
 	source: string,
 ): string | null {
 	const lines = source.split("\n");
@@ -128,7 +128,7 @@ export function extractLeadingComment(
 }
 
 /** Classify a chunk's structural role based on its AST node type */
-export function classifyRole(node: Parser.SyntaxNode): StructuralRole {
+export function classifyRole(node: Node): StructuralRole {
 	if (DEFINITION_TYPES.has(node.type)) return "definition";
 	if (ORCHESTRATION_TYPES.has(node.type)) return "orchestration";
 	return "implementation";
@@ -155,11 +155,11 @@ export function buildContextString(ctx: ChunkContext): string {
 	return lines.join("\n");
 }
 
-function extractNodeName(node: Parser.SyntaxNode): string | undefined {
+function extractNodeName(node: Node): string | undefined {
 	const nameNode =
 		node.childForFieldName("name") ??
 		node.children.find(
-			(c: Parser.SyntaxNode) =>
+			(c: Node) =>
 				c.type === "identifier" || c.type === "type_identifier",
 		);
 	return nameNode?.text;

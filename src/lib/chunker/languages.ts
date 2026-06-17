@@ -26,7 +26,9 @@ export type LanguageId =
 	| "kotlin"
 	| "php"
 	| "c_sharp"
-	| "vue";
+	| "vue"
+	| "markdown"
+	| "nix";
 
 export interface LanguageConfig {
 	id: LanguageId;
@@ -191,20 +193,15 @@ export const LANGUAGES: LanguageConfig[] = [
 		id: "swift",
 		extensions: [".swift"],
 		wasmFile: "tree-sitter-swift.wasm",
+		// Modern tree-sitter-swift represents struct/enum/extension/actor all as
+		// class_declaration (distinguished by keyword), so it covers them all.
 		chunkTypes: [
 			"function_declaration",
 			"class_declaration",
-			"struct_declaration",
-			"enum_declaration",
 			"protocol_declaration",
-			"extension_declaration",
 		],
 		importTypes: ["import_declaration"],
-		scopeTypes: [
-			"class_declaration",
-			"struct_declaration",
-			"extension_declaration",
-		],
+		scopeTypes: ["class_declaration"],
 	},
 	{
 		id: "json",
@@ -234,11 +231,8 @@ export const LANGUAGES: LanguageConfig[] = [
 		id: "lua",
 		extensions: [".lua"],
 		wasmFile: "tree-sitter-lua.wasm",
-		chunkTypes: [
-			"function_declaration",
-			"local_function",
-			"function_definition",
-		],
+		// Modern tree-sitter-lua folds `local function` into function_declaration.
+		chunkTypes: ["function_declaration", "function_definition"],
 		importTypes: ["call"],
 		scopeTypes: [],
 	},
@@ -265,9 +259,13 @@ export const LANGUAGES: LanguageConfig[] = [
 		id: "zig",
 		extensions: [".zig"],
 		wasmFile: "tree-sitter-zig.wasm",
-		chunkTypes: ["FnProto", "VarDecl", "ContainerDecl", "TestDecl"],
+		chunkTypes: [
+			"function_declaration",
+			"variable_declaration",
+			"test_declaration",
+		],
 		importTypes: [],
-		scopeTypes: ["ContainerDecl"],
+		scopeTypes: ["struct_declaration", "enum_declaration", "union_declaration"],
 	},
 	{
 		id: "bash",
@@ -343,7 +341,7 @@ export const LANGUAGES: LanguageConfig[] = [
 	{
 		id: "c_sharp",
 		extensions: [".cs"],
-		wasmFile: "tree-sitter-c_sharp.wasm",
+		wasmFile: "tree-sitter-csharp.wasm",
 		chunkTypes: [
 			"class_declaration",
 			"interface_declaration",
@@ -370,6 +368,25 @@ export const LANGUAGES: LanguageConfig[] = [
 		importTypes: [],
 		scopeTypes: [],
 	},
+	{
+		id: "markdown",
+		extensions: [".md", ".markdown", ".mdx"],
+		wasmFile: "tree-sitter-markdown.wasm",
+		// Markdown is chunked by a heading-aware splitter (see chunker), not by
+		// collectChunks — its `section` nodes nest, so emitting them whole would
+		// collapse a doc into one chunk. chunkTypes/scopeTypes are unused here.
+		chunkTypes: ["section"],
+		importTypes: [],
+		scopeTypes: ["section"],
+	},
+	{
+		id: "nix",
+		extensions: [".nix"],
+		wasmFile: "tree-sitter-nix.wasm",
+		chunkTypes: ["binding"],
+		importTypes: [],
+		scopeTypes: ["attrset_expression", "binding_set"],
+	},
 ];
 
 const extToLang = new Map<string, LanguageConfig>();
@@ -387,8 +404,12 @@ export function getLanguageForFile(
 }
 
 export function getWasmPath(lang: LanguageConfig): string | undefined {
+	// Grammars ship as per-language @lumis-sh/wasm-<slug> packages built for the
+	// current web-tree-sitter ABI. The wasm is named tree-sitter-<slug>.wasm and
+	// the slug is wasmFile minus the "tree-sitter-" prefix and ".wasm" suffix.
+	const slug = lang.wasmFile.replace(/^tree-sitter-/, "").replace(/\.wasm$/, "");
 	try {
-		return require.resolve(`tree-sitter-wasms/out/${lang.wasmFile}`);
+		return require.resolve(`@lumis-sh/wasm-${slug}/${lang.wasmFile}`);
 	} catch {
 		return undefined;
 	}
