@@ -10,7 +10,7 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        nodejs = pkgs.nodejs_20;
+        nodejs = pkgs.nodejs_24;
         pnpm = pkgs.pnpm_10;
 
         src = pkgs.lib.cleanSource ./.;
@@ -19,7 +19,7 @@
           pname = "lmgrep";
           version = "0.1.0";
           inherit src;
-          hash = "sha256-u/XDNPilYhbT7ChhBG8lGn8Qk1NdkSscyiIX/owqIns=";
+          hash = "sha256-kq4o/JUBoDo2lM4yJSAobn03Emiu9xXutcu1LEQ03SY=";
           fetcherVersion = 3;
         };
 
