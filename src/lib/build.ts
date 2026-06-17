@@ -276,18 +276,69 @@ async function buildLocked(
 
 	const texts = newChunks.map((c) => `${c.context}\n${c.content}`);
 
-	let vectors: (number[] | null)[];
+	// Per-file count of new chunks still to embed. A file's hash is committed
+	// only once all of its new chunks are embedded AND persisted — so a hard
+	// crash leaves completed files done (resume skips them) and in-flight files
+	// uncommitted (resume re-embeds them cleanly after dropping partial chunks).
+	const pendingByFile = new Map<string, number>();
+	for (const c of newChunks) {
+		pendingByFile.set(c.filePath, (pendingByFile.get(c.filePath) ?? 0) + 1);
+	}
+
+	let succeeded = 0;
+	let storeProgress = 0;
+	let embeddingDimensions: number | undefined;
+	const vocabSource: Array<{ name: string; content: string }> = [];
+
+	// Persist each batch's successes immediately, then commit any file whose
+	// chunks are now fully embedded. Awaited inside embedBatched per batch.
+	async function persistBatch(
+		items: Array<{ index: number; vector: number[] }>,
+	): Promise<void> {
+		if (items.length === 0) return;
+
+		const chunks: IndexedChunk[] = items.map((it) => ({
+			...newChunks[it.index],
+			vector: it.vector,
+		}));
+		await store.addChunks(chunks);
+
+		succeeded += chunks.length;
+		storeProgress += chunks.length;
+		if (embeddingDimensions === undefined) {
+			embeddingDimensions = chunks[0].vector.length;
+		}
+		if (opts.reset) {
+			for (const c of chunks) {
+				vocabSource.push({ name: c.name, content: c.content });
+			}
+		}
+		emit?.({ phase: "store", current: storeProgress, total: newChunks.length });
+
+		const completed: Array<{ filePath: string; fileHash: string }> = [];
+		for (const c of chunks) {
+			const left = (pendingByFile.get(c.filePath) ?? 0) - 1;
+			pendingByFile.set(c.filePath, left);
+			if (left === 0 && currentHashes.has(c.filePath)) {
+				completed.push({
+					filePath: c.filePath,
+					fileHash: currentHashes.get(c.filePath)!,
+				});
+			}
+		}
+		if (completed.length > 0) await store.upsertFileHashes(completed);
+	}
+
 	let failedIndices: Set<number>;
 	let aborted = false;
 
 	try {
-		const result = await resilient.embedBatched(texts);
-		vectors = result.vectors;
+		const result = await resilient.embedBatched(texts, persistBatch);
 		failedIndices = result.failedIndices;
 	} catch (err) {
 		if (err instanceof EmbeddingAbortError) {
 			aborted = true;
-			vectors = err.vectors;
+			// Successes were already persisted incrementally via persistBatch.
 			failedIndices = err.failedIndices;
 			logger.error(err.message);
 		} else {
@@ -295,41 +346,25 @@ async function buildLocked(
 		}
 	}
 
-	// Store successful chunks
-	const indexed: IndexedChunk[] = [];
+	// Files whose every new chunk succeeded were already committed above. Commit
+	// the rest that are nonetheless complete: files with no new chunks (only
+	// already-indexed/oversized chunks) or that failed to chunk — as long as
+	// none of their chunks failed to embed.
 	const failedFiles = new Set<string>();
-	let embeddingDimensions: number | undefined;
+	for (const idx of failedIndices) failedFiles.add(newChunks[idx].filePath);
 
-	for (let i = 0; i < newChunks.length; i++) {
-		if (vectors[i] !== null) {
-			indexed.push({ ...newChunks[i], vector: vectors[i]! });
-			if (embeddingDimensions === undefined) {
-				embeddingDimensions = vectors[i]!.length;
-			}
-		} else {
-			failedFiles.add(newChunks[i].filePath);
-		}
-	}
-
-	if (indexed.length > 0) {
-		const STORE_BATCH = 500;
-		for (let i = 0; i < indexed.length; i += STORE_BATCH) {
-			await store.addChunks(indexed.slice(i, i + STORE_BATCH));
-			emit?.({
-				phase: "store",
-				current: Math.min(i + STORE_BATCH, indexed.length),
-				total: indexed.length,
-			});
-		}
-	}
-
-	// Save file hashes for files with no failures
-	const hashEntries = changedPaths
-		.filter((fp) => currentHashes.has(fp) && !failedFiles.has(fp))
+	const remainingHashEntries = changedPaths
+		.filter(
+			(fp) =>
+				currentHashes.has(fp) &&
+				!failedFiles.has(fp) &&
+				(pendingByFile.get(fp) ?? 0) === 0,
+		)
 		.map((fp) => ({ filePath: fp, fileHash: currentHashes.get(fp)! }));
-	if (hashEntries.length > 0) await store.upsertFileHashes(hashEntries);
+	if (remainingHashEntries.length > 0) {
+		await store.upsertFileHashes(remainingHashEntries);
+	}
 
-	const succeeded = indexed.length;
 	const failed = failedIndices.size;
 
 	if (aborted) {
@@ -350,13 +385,8 @@ async function buildLocked(
 	// Build vocab table for faceting on full rebuilds. Incremental builds skip
 	// this because df computed on a delta is meaningless — run `lmgrep facet
 	// index` to (re)build the vocab from all existing chunks.
-	if (opts.reset && indexed.length > 0) {
-		await buildVocab(
-			store,
-			indexed.map((c) => ({ name: c.name, content: c.content })),
-			embedder,
-			log,
-		);
+	if (opts.reset && vocabSource.length > 0) {
+		await buildVocab(store, vocabSource, embedder, log);
 	}
 
 	// Update project metadata (preserve original model/dimensions as baseline)

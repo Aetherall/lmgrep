@@ -164,8 +164,18 @@ export class ResilientEmbedder {
 	private static readonly MAX_CONSECUTIVE_FAILURES = 3;
 	private static readonly MAX_RELOADS = 3;
 
+	/**
+	 * Embed `texts` batch by batch. After each batch, `onBatch` (if given) is
+	 * awaited with the items that just embedded successfully, so the caller can
+	 * persist incrementally rather than buffering every vector until the end —
+	 * embeddings then survive a hard crash and resume skips completed work.
+	 * Each successful index is reported through `onBatch` exactly once.
+	 */
 	async embedBatched(
 		texts: string[],
+		onBatch?: (
+			items: Array<{ index: number; vector: number[] }>,
+		) => Promise<void>,
 	): Promise<{ vectors: (number[] | null)[]; failedIndices: Set<number> }> {
 		const batchSize = this.config.batchSize;
 		const vectors: (number[] | null)[] = new Array(texts.length).fill(null);
@@ -179,10 +189,13 @@ export class ResilientEmbedder {
 
 			this.events?.onBatchStart?.(batchNum, totalBatches);
 
+			const persisted: Array<{ index: number; vector: number[] }> = [];
+
 			try {
 				const batchVectors = await this.embedder.embed(batch);
 				for (let j = 0; j < batch.length; j++) {
 					vectors[i + j] = batchVectors[j];
+					persisted.push({ index: i + j, vector: batchVectors[j] });
 				}
 				this.consecutiveFailures = 0;
 			} catch {
@@ -192,6 +205,7 @@ export class ResilientEmbedder {
 					try {
 						const [vec] = await this.embedder.embed([batch[j]]);
 						vectors[i + j] = vec;
+						persisted.push({ index: i + j, vector: vec });
 					} catch (err) {
 						failedIndices.add(i + j);
 						batchFailed++;
@@ -206,6 +220,12 @@ export class ResilientEmbedder {
 				} else {
 					this.consecutiveFailures = 0;
 				}
+			}
+
+			// Persist this batch's successes before any abort below, so partial
+			// progress is durable even if the next batches force an abort.
+			if (onBatch && persisted.length > 0) {
+				await onBatch(persisted);
 			}
 
 			const succeeded = vectors.filter((v) => v !== null).length;
