@@ -82,7 +82,7 @@ core.onHealthChange(() => {
 	searchTool.update({ description: core.buildSearchDescription() });
 });
 
-core.startHealthLoop();
+core.start();
 
 process.on("exit", () => {
 	core.dispose().catch(() => {});

@@ -111,7 +111,7 @@ export interface LmgrepCore {
 	buildSearchDescription(): string;
 	currentHealth(): HealthState;
 	onHealthChange(cb: (state: HealthState) => void): () => void;
-	startHealthLoop(): void;
+	start(): void;
 	executeSearch(args: SearchArgs): Promise<ToolResult>;
 	executeFacet(args: FacetArgs): Promise<ToolResult>;
 	executeListProjects(): Promise<ToolResult>;
@@ -164,6 +164,8 @@ export async function createLmgrepCore(opts: {
 	const listeners = new Set<(s: HealthState) => void>();
 	let stopWatcher: (() => void) | undefined;
 	let pollTimer: NodeJS.Timeout | undefined;
+	let polling = false;
+	let pollDelayMs = 0;
 	let disposed = false;
 
 	function tryStartWatcher(): void {
@@ -237,22 +239,55 @@ export async function createLmgrepCore(opts: {
 			state = next;
 			for (const cb of listeners) cb(next);
 		}
-		if (next.healthy) tryStartWatcher();
+		if (next.healthy) {
+			// Recovery detected — stop pinging so we don't keep the embedder
+			// awake now that it's back. The loop re-arms only on the next
+			// failed search/facet.
+			tryStartWatcher();
+			stopHealthLoop();
+		}
+	}
+
+	// Boot: start the file watcher but DO NOT poll the embedder. While healthy
+	// and idle we never ping it — the initial (optimistic) state already drives
+	// an accurate tool description, and the embedder is free to sleep. The poll
+	// loop arms only when a real search hits a down embedder (see the catch
+	// blocks in executeSearch/executeFacet).
+	function start(): void {
+		tryStartWatcher();
+	}
+
+	// Recovery poll: armed when a search fails because the embedder is down.
+	// Pings on a backoff schedule purely to detect when the embedder comes
+	// back, then disarms itself (refreshHealth → stopHealthLoop on recovery).
+	const POLL_BASE_MS = index.config.local ? 10_000 : 60_000;
+	// Cap the interval so a long-down embedder isn't pinged every base period
+	// for hours — ~2min local, ~5min for billable remote providers.
+	const POLL_MAX_MS = index.config.local ? 120_000 : 300_000;
+
+	async function runHealthPoll(): Promise<void> {
+		if (!polling || disposed) return;
+		await refreshHealth();
+		// refreshHealth() calls stopHealthLoop() if the embedder recovered.
+		if (!polling || disposed) return;
+		pollTimer = setTimeout(runHealthPoll, pollDelayMs);
+		pollDelayMs = Math.min(pollDelayMs * 2, POLL_MAX_MS);
 	}
 
 	function startHealthLoop(): void {
-		if (pollTimer) return;
+		if (polling) return;
+		polling = true;
+		pollDelayMs = POLL_BASE_MS;
 		tryStartWatcher();
-		// Non-local providers may bill per request — poll less often.
-		const intervalMs = index.config.local ? 10_000 : 60_000;
-		refreshHealth();
-		pollTimer = setInterval(refreshHealth, intervalMs);
+		void runHealthPoll();
 	}
 
 	function stopHealthLoop(): void {
-		if (!pollTimer) return;
-		clearInterval(pollTimer);
-		pollTimer = undefined;
+		polling = false;
+		if (pollTimer) {
+			clearTimeout(pollTimer);
+			pollTimer = undefined;
+		}
 	}
 
 	function markHealthy(): void {
@@ -377,7 +412,7 @@ export async function createLmgrepCore(opts: {
 			listeners.add(cb);
 			return () => listeners.delete(cb);
 		},
-		startHealthLoop,
+		start,
 		executeSearch,
 		executeFacet,
 		executeListProjects,
