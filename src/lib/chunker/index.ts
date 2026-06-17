@@ -217,7 +217,12 @@ function extractNodeName(node: Node): string | undefined {
 	return nameNode?.text;
 }
 
-/** Fallback: chunk by sliding window for unsupported or empty-parse files */
+/**
+ * Fallback: chunk by sliding window for files with no grammar or no chunkable
+ * structure (e.g. linear shell scripts). A small window overlap keeps a passage
+ * spanning a window boundary recallable; it's kept light (20%) because the
+ * extra rows are pure index bloat now that search dedups overlapping results.
+ */
 function fallbackChunk(filePath: string, cwd: string): Chunk[] {
 	const absolutePath = join(cwd, filePath);
 	const source = readFileSync(absolutePath, "utf-8");
@@ -226,7 +231,7 @@ function fallbackChunk(filePath: string, cwd: string): Chunk[] {
 	if (lines.length === 0) return [];
 
 	const WINDOW = 50;
-	const STRIDE = 25;
+	const STRIDE = 40;
 	const chunks: Chunk[] = [];
 
 	for (let i = 0; i < lines.length; i += STRIDE) {
