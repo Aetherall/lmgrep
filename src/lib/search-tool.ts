@@ -57,7 +57,7 @@ export const searchParamSpecs: SearchParamSpecs = {
 	},
 	limit: {
 		description: "Maximum number of results",
-		default: 10,
+		default: 5,
 	},
 	filePrefix: {
 		description: "Restrict to files under this path (e.g. 'src/lib')",
