@@ -5,6 +5,7 @@ _lmgrep() {
   commands=(
     'index:Index the current directory for semantic search'
     'search:Search the codebase using natural language'
+    'ask:Answer a question with a local research loop (search, read, synthesize)'
     'status:Show index stats and check embedding connectivity'
     'repair:Detect and fix index inconsistencies'
     'serve:Watch the current directory and re-index on changes'
@@ -34,7 +35,8 @@ _lmgrep() {
             '(-v --verbose)'{-v,--verbose}'[Show file-by-file progress]' \
             '(-s --since)'{-s,--since}'[Only consider files modified within duration]:duration' \
             '(-f --force)'{-f,--force}'[Force re-embed even if file hash unchanged]' \
-            '(-d --dry)'{-d,--dry}'[Show what would be indexed without actually doing it]'
+            '(-d --dry)'{-d,--dry}'[Show what would be indexed without actually doing it]' \
+            '--database[Target a specific database by name or path]:name or path:_files -/'
           ;;
         search)
           _arguments \
@@ -49,17 +51,31 @@ _lmgrep() {
             '--type[Only return chunks of these AST types]:types' \
             '--language[Only return chunks from files with these extensions]:extensions' \
             '--project[Search a different project index]:path:_files -/' \
-            '--across[Search multiple project indexes]:paths'
+            '--across[Search multiple project indexes]:paths' \
+            '--database[Target a specific database by name or path]:name or path:_files -/'
+          ;;
+        ask)
+          _arguments \
+            '1:question' \
+            '--json[Output the full result as JSON]' \
+            '--quiet[Suppress the live research trace on stderr]' \
+            '--database[Target a specific database by name or path]:name or path:_files -/'
           ;;
         status)
           _arguments \
             '(-c --changes)'{-c,--changes}'[Scan for changed files since last index]' \
-            '--json[Output status as JSON]'
+            '--json[Output status as JSON]' \
+            '--database[Target a specific database by name or path]:name or path:_files -/'
           ;;
         repair)
           _arguments \
             '(-d --dry)'{-d,--dry}'[Show what would be repaired without making changes]' \
-            '--json[Output repair results as JSON]'
+            '--json[Output repair results as JSON]' \
+            '--database[Target a specific database by name or path]:name or path:_files -/'
+          ;;
+        serve|compact)
+          _arguments \
+            '--database[Target a specific database by name or path]:name or path:_files -/'
           ;;
         init)
           _arguments \

@@ -8,6 +8,7 @@ lmgrep uses [Tree-sitter](https://tree-sitter.github.io/tree-sitter/) to parse s
 
 - **Any embedding provider** — works with Ollama, OpenAI, Google, or any provider supported by the [Vercel AI SDK](https://sdk.vercel.ai/)
 - **Tree-sitter chunking** — splits code at AST boundaries so search results are complete, meaningful units
+- **Ask (research mode)** — `lmgrep ask` runs a local model that searches, reads, and synthesizes a cited answer, so agents spend one call instead of many searches
 - **MCP server** — built-in MCP server (`lmgrep mcp`) for integration with Claude Code, Cursor, and other AI tools
 - **File watching** — `lmgrep serve` watches for changes and incrementally re-indexes
 - **P2P sharing** — share your index with teammates via direct peer-to-peer transfer
@@ -61,6 +62,7 @@ lmgrep search "error handling" --file-prefix src/lib --language .ts
 |---|---|
 | `lmgrep index` | Index the current directory |
 | `lmgrep search <query>` | Search using natural language |
+| `lmgrep ask <question>` | Answer a question with a local research loop (search → read → cited answer) |
 | `lmgrep status` | Show index stats, embedding connectivity, and running processes |
 | `lmgrep serve` | Watch for changes and re-index automatically |
 | `lmgrep mcp` | Start the MCP server (stdio transport) |
@@ -98,6 +100,50 @@ lmgrep search "error handling" --file-prefix src/lib --language .ts
 --dry         Show what would be indexed without doing it
 --verbose     Show file-by-file progress
 ```
+
+## Ask (research mode)
+
+`lmgrep ask` answers a question *about the codebase* instead of returning raw chunks. A local chat model runs a short agentic loop — it searches the index, reads the matching code, and writes a concise answer where every claim is cited as `[n] → file:line`. This is aimed at AI agents: one `ask` call replaces several searches and pages of chunks, so it's far cheaper on the agent's context.
+
+It requires a generative `chatModel` in addition to your embedding `model`. On a local runtime (LM Studio, Ollama) it reuses the same provider and `baseURL`, so one extra config line is enough:
+
+```yaml
+# ~/.config/lmgrep/config.yml (or .lmgrep.yml)
+model: lmstudio:text-embedding-nomic-embed-code   # embeddings (retrieval)
+chatModel: lmstudio:google/gemma-4-e2b            # generation (the research loop)
+```
+
+```sh
+lmgrep ask "how does the file watcher trigger reindexing"
+lmgrep ask "where are webhooks authenticated and what token format" --json
+```
+
+The answer, its `Sources:` list, and a one-line trace (queries run, steps, time) are printed; the live search trace streams to stderr (silence it with `--quiet`). When configured, `ask` is also exposed as an MCP tool alongside `search`.
+
+```
+--json      Output the full result (answer, sources, trace) as JSON
+--quiet     Suppress the live research trace on stderr
+--database  Target a specific database by name or path
+```
+
+Config keys: `chatModel` (required for `ask`), `chatProvider` / `chatBaseURL` (default to the embedding `provider` / `baseURL`), `chatMaxSteps` (default 8), `chatTimeoutMs` (per model call, default 240000).
+
+## Targeting a database
+
+By default every command picks its database from the current directory, git-aware: one database per repo, scoped to the checked-out branch. `--database` overrides that and works on `index`, `search`, `ask`, `facet`, `status`, `repair`, `serve`, `mcp`, `compact`, and `prune`.
+
+```sh
+# A bare name — an independent index under ~/.local/state/lmgrep/<name>
+lmgrep index --database notes
+lmgrep search "retry policy" --database notes
+
+# A path (anything containing a separator) — a specific database directory
+lmgrep search "retry policy" --database ./tmp/scratch-index
+```
+
+The files indexed still come from the current directory; only the database identity changes. A manually targeted database is flat: it is branch-agnostic, so switching git branches never hides results, and it does not participate in the ancestor-prefix resolution that lets you search a parent repo's index from a subdirectory.
+
+`prune` refuses to delete a `--database` path that isn't recognizably an lmgrep database.
 
 ## P2P index sharing
 

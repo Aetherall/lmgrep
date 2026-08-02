@@ -21,6 +21,21 @@ export interface LmgrepConfig {
 	documentPrefix?: string;
 	/** Max tokens per chunk — chunks exceeding this are skipped (estimated at 4 chars/token) */
 	maxTokens?: number;
+	/**
+	 * Generative chat model for `lmgrep ask`, in "provider:model" format
+	 * (e.g. "lmstudio:qwen/qwen3.5-9b"). Optional — when set, it enables the
+	 * agentic research loop that searches, reads, and synthesizes a grounded
+	 * answer instead of returning raw chunks.
+	 */
+	chatModel?: string;
+	/** Override the chat provider package (defaults to `provider`, then `@ai-sdk/<provider>`). */
+	chatProvider?: string;
+	/** Base URL for the chat model (defaults to `baseURL` — reuses the embedding endpoint). */
+	chatBaseURL?: string;
+	/** Max agentic steps `ask` may take before it must synthesize (default 8). */
+	chatMaxSteps?: number;
+	/** Wall-clock timeout for a single `ask` model call, in ms (default 240000). */
+	chatTimeoutMs?: number;
 	/** Additional ignore patterns (merged with .gitignore and defaults) */
 	ignore?: string[];
 	/** File extension overrides */

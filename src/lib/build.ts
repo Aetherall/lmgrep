@@ -57,7 +57,7 @@ export async function build(
 ): Promise<{ succeeded: number; failed: number }> {
 	// Serialize writes across processes (the watcher plus any ad-hoc
 	// `lmgrep index`) so concurrent indexers can't race into duplicate rows.
-	return withWriteLock(cwd, () =>
+	return withWriteLock(store.path, () =>
 		buildLocked(cwd, store, config, embedder, chunker, opts, logger),
 	);
 }
@@ -390,7 +390,7 @@ async function buildLocked(
 	}
 
 	// Update project metadata (preserve original model/dimensions as baseline)
-	writeProjectMetadata(cwd, {
+	writeProjectMetadata(store.path, store.branch, cwd, {
 		model: config.model,
 		dimensions: embeddingDimensions,
 	});

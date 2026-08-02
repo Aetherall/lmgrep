@@ -9,9 +9,11 @@ import {
 	Store,
 	findIndexedAncestor,
 	resolveProject,
+	resolveDb,
 	readProjectMetadata,
 	getDbPath,
 	extractModelFamily,
+	type ResolvedDb,
 } from "./lib/store.js";
 import type {
 	BuildOptions,
@@ -77,22 +79,30 @@ export {
 	getDbPath,
 	getLegacyDbPath,
 	resolveProject,
+	resolveDb,
 	discoverIndexedProjects,
 	writeProjectMetadata,
 	readProjectMetadata,
+	isDatabaseDir,
 	extractModelFamily,
 	acquireDbLock,
 	releaseDbLock,
 	isDbLocked,
 	discoverRunningProcesses,
 } from "./lib/store.js";
-export type { ProjectMetadata, RunningProcess } from "./lib/store.js";
+export type { ProjectMetadata, ResolvedDb, RunningProcess } from "./lib/store.js";
 export { startWatcher } from "./lib/serve.js";
 export { loadConfig, getConfigDir, getGlobalConfigPath } from "./lib/config.js";
 export { startExport, startImport, generateShareCode, SHARE_CODE_RE } from "./lib/p2p.js";
 
 export interface CreateIndexOptions {
 	cwd: string;
+	/**
+	 * Target a specific database instead of the git-aware default. A bare name
+	 * creates an independent index under `~/.local/state/lmgrep/<name>`; a path
+	 * points at a specific database directory. See `resolveDb`.
+	 */
+	database?: string;
 	config?: Partial<LmgrepConfig>;
 	embedder?: Embedder;
 	chunker?: Chunker;
@@ -135,7 +145,8 @@ export async function createIndex(
 	const fileConfig = loadConfig(cwd);
 	const config: LmgrepConfig = { ...fileConfig, ...options.config };
 
-	const store = Store.forProject(cwd);
+	const resolved = resolveDb(cwd, options.database);
+	const store = Store.forResolved(resolved);
 	const embedder = options.embedder ?? new AISDKEmbedder(config);
 	const chunker = options.chunker ?? new TreeSitterChunker();
 	const logger = options.logger ?? consoleLogger;
@@ -152,8 +163,7 @@ export async function createIndex(
 			let queryVector = await embedder.embedQuery(query);
 
 			// Check model compatibility with the index
-			const dbPath = getDbPath(cwd);
-			const meta = readProjectMetadata(dbPath);
+			const meta = readProjectMetadata(resolved.dbPath);
 			if (meta) {
 				// Hard error: dimension mismatch
 				if (meta.dimensions != null && queryVector.length !== meta.dimensions) {
@@ -186,7 +196,7 @@ export async function createIndex(
 			}
 
 			// Determine which stores to search
-			const targets = resolveSearchTargets(cwd, store, opts);
+			const targets = resolveSearchTargets(cwd, store, opts, resolved);
 			const limit = opts.limit ?? 25;
 
 			// Search all targets
@@ -389,15 +399,22 @@ export async function createIndex(
 		},
 
 		async watch() {
-			return serve(cwd, store, config, embedder, chunker, logger);
+			return serve(cwd, store, config, embedder, chunker, resolved, logger);
 		},
 
 		async status(): Promise<StatusInfo> {
-			const ancestor = findIndexedAncestor(cwd);
-			const projectRoot = ancestor ? ancestor.root : cwd;
+			// A manually-targeted database is flat — no ancestor/prefix walking.
+			const ancestor = resolved.manual ? undefined : findIndexedAncestor(cwd);
+			const projectRoot = resolved.manual
+				? resolved.root
+				: ancestor
+					? ancestor.root
+					: cwd;
 			const prefix = ancestor?.prefix ?? "";
 			const statusStore =
-				projectRoot === cwd ? store : Store.forProject(projectRoot);
+				resolved.manual || projectRoot === cwd
+					? store
+					: Store.forProject(projectRoot);
 
 			const files = await statusStore.getIndexedFiles();
 			const hashes = await statusStore.getIndexedHashes();
@@ -440,7 +457,9 @@ export async function createIndex(
 			}
 
 			// Read index metadata for model/dimensions info
-			const meta = readProjectMetadata(getDbPath(projectRoot));
+			const meta = readProjectMetadata(
+				resolved.manual ? resolved.dbPath : getDbPath(projectRoot),
+			);
 
 			return {
 				projectRoot,
@@ -761,6 +780,7 @@ function resolveSearchTargets(
 	cwd: string,
 	localStore: Store,
 	opts: SearchOptions,
+	resolved: ResolvedDb,
 ): SearchTarget[] {
 	// --across: search multiple projects
 	if (opts.across && opts.across.length > 0) {
@@ -792,15 +812,18 @@ function resolveSearchTargets(
 		];
 	}
 
-	// Default: search local project, resolving ancestor prefix
+	// Default: search local project, resolving ancestor prefix. A
+	// manually-targeted database is flat — search it as-is with no prefix.
 	let filePrefix = opts.filePrefix;
 	let searchStore = localStore;
-	const ancestor = findIndexedAncestor(cwd);
-	if (ancestor?.prefix) {
-		searchStore = Store.forProject(ancestor.root);
-		filePrefix = filePrefix
-			? `${ancestor.prefix}/${filePrefix}`
-			: ancestor.prefix;
+	if (!resolved.manual) {
+		const ancestor = findIndexedAncestor(cwd);
+		if (ancestor?.prefix) {
+			searchStore = Store.forProject(ancestor.root);
+			filePrefix = filePrefix
+				? `${ancestor.prefix}/${filePrefix}`
+				: ancestor.prefix;
+		}
 	}
 
 	return [{ store: searchStore, filePrefix }];

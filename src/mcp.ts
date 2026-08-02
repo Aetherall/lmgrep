@@ -10,7 +10,10 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { createLmgrepCore } from "./lib/search-tool.js";
 
-const core = await createLmgrepCore({ cwd: process.cwd() });
+const core = await createLmgrepCore({
+	cwd: process.cwd(),
+	database: process.env.LMGREP_DATABASE || undefined,
+});
 
 const server = new McpServer({
 	name: "lmgrep",
@@ -77,6 +80,25 @@ server.tool(
 		return { content: [{ type: "text" as const, text: result.text }] };
 	},
 );
+
+// `ask` runs a local research loop — only registered when a chat model is
+// configured, so agents never see a tool they can't use.
+if (core.askAvailable) {
+	server.tool(
+		"ask",
+		core.askDescription,
+		{
+			question: z.string().describe(core.askParam.description),
+		},
+		async (args) => {
+			const result = await core.executeAsk(args);
+			return {
+				content: [{ type: "text" as const, text: result.text }],
+				...(result.isError ? { isError: true } : {}),
+			};
+		},
+	);
+}
 
 core.onHealthChange(() => {
 	searchTool.update({ description: core.buildSearchDescription() });

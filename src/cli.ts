@@ -19,6 +19,7 @@ import { join, resolve } from "node:path";
 import { execSync, spawnSync } from "node:child_process";
 import { createIndex } from "./index.js";
 import { getGlobalConfigPath } from "./lib/config.js";
+import { research, type TraceEntry } from "./lib/research.js";
 import { walkFiles } from "./lib/scanner.js";
 import { renameSync } from "node:fs";
 import {
@@ -30,8 +31,18 @@ import {
 	extractModelFamily,
 	discoverIndexedProjects,
 	discoverRunningProcesses,
+	isDatabaseDir,
+	resolveDb,
 	withWriteLock,
 } from "./lib/store.js";
+
+// Shared help text for the `--database` flag. A bare name creates an
+// independent index alongside the others; a path points at a specific
+// database directory. Defaults to the git-aware database for the cwd.
+const DATABASE_OPTION =
+	"Target a specific database instead of the git-aware default: a bare name " +
+	"creates an independent index under ~/.local/state/lmgrep/<name>, a path " +
+	"points at a specific database directory";
 
 const program = new Command();
 
@@ -54,9 +65,10 @@ program
 		"Force re-embed even if file hash unchanged (use with --since)",
 	)
 	.option("-d, --dry", "Show what would be indexed without actually doing it")
+	.option("--database <name-or-path>", DATABASE_OPTION)
 	.action(async (opts) => {
 		const cwd = process.cwd();
-		const index = await createIndex({ cwd });
+		const index = await createIndex({ cwd, database: opts.database });
 		await index.build({
 			reset: opts.reset,
 			verbose: opts.verbose,
@@ -96,9 +108,10 @@ program
 		"--across <paths>",
 		"Search multiple project indexes (comma-separated paths)",
 	)
+	.option("--database <name-or-path>", DATABASE_OPTION)
 	.action(async (query, opts) => {
 		const cwd = process.cwd();
-		const index = await createIndex({ cwd });
+		const index = await createIndex({ cwd, database: opts.database });
 		const results = await index.search(query, {
 			limit: Number.parseInt(opts.limit, 10),
 			filePrefix: opts.filePrefix,
@@ -152,6 +165,53 @@ program
 		await index.close();
 	});
 
+program
+	.command("ask <question>")
+	.description(
+		"Answer a question with a local agentic research loop (search + read + synthesize). Requires `chatModel` in config.",
+	)
+	.option("--json", "Output the full result (answer, sources, trace) as JSON")
+	.option("--quiet", "Suppress the live research trace on stderr")
+	.option("--database <name-or-path>", DATABASE_OPTION)
+	.action(async (question, opts) => {
+		const cwd = process.cwd();
+		const index = await createIndex({ cwd, database: opts.database });
+		try {
+			const result = await research({
+				index,
+				cwd,
+				question,
+				onTrace: opts.quiet
+					? undefined
+					: (t) => process.stderr.write(`${formatTrace(t)}\n`),
+			});
+
+			if (opts.json) {
+				console.log(JSON.stringify(result, null, 2));
+				return;
+			}
+
+			if (!opts.quiet) process.stderr.write("\n");
+			console.log(result.answer);
+
+			if (result.sources.length > 0) {
+				console.log("\nSources:");
+				for (const s of result.sources) {
+					console.log(`  [${s.n}] ${s.path}:${s.startLine}-${s.endLine}`);
+				}
+			}
+
+			const secs = (result.elapsedMs / 1000).toFixed(1);
+			const tag = result.degraded ? " (degraded: synthesis unavailable)" : "";
+			process.stderr.write(`\n(${result.steps} steps, ${secs}s)${tag}\n`);
+		} catch (err) {
+			console.error((err as Error).message);
+			process.exitCode = 1;
+		} finally {
+			await index.close();
+		}
+	});
+
 {
 	const facet = program
 		.command("facet")
@@ -166,9 +226,10 @@ program
 			"Min document frequency for a term to be embedded",
 			"10",
 		)
+		.option("--database <name-or-path>", DATABASE_OPTION)
 		.action(async (opts) => {
 			const cwd = process.cwd();
-			const index = await createIndex({ cwd });
+			const index = await createIndex({ cwd, database: opts.database });
 			try {
 				const result = await index.facetIndex({
 					reset: opts.reset,
@@ -190,9 +251,10 @@ program
 		.option("--file-prefix <prefix>", "Only search files matching this path prefix")
 		.option("--json", "Output as JSON")
 		.option("-v, --verbose", "Show top vocab candidates per cluster")
+		.option("--database <name-or-path>", DATABASE_OPTION)
 		.action(async (query, opts) => {
 			const cwd = process.cwd();
-			const index = await createIndex({ cwd });
+			const index = await createIndex({ cwd, database: opts.database });
 			const result = await index.facetSearch(query, {
 				limit: Number.parseInt(opts.limit, 10),
 				k: Number.parseInt(opts.k, 10),
@@ -221,9 +283,10 @@ program
 		.description("Print the facet list at a node (e.g. kx3 or kx3/token)")
 		.option("--json", "Output as JSON")
 		.option("-v, --verbose", "Show top vocab candidates per cluster")
+		.option("--database <name-or-path>", DATABASE_OPTION)
 		.action(async (path, opts) => {
 			const cwd = process.cwd();
-			const index = await createIndex({ cwd });
+			const index = await createIndex({ cwd, database: opts.database });
 			try {
 				const result = await index.facetList(path);
 				if (opts.json) {
@@ -250,9 +313,10 @@ program
 		.description("Print the result chunks at a node")
 		.option("--json", "Output as JSON")
 		.option("--compact", "Show file paths only")
+		.option("--database <name-or-path>", DATABASE_OPTION)
 		.action(async (path, opts) => {
 			const cwd = process.cwd();
-			const index = await createIndex({ cwd });
+			const index = await createIndex({ cwd, database: opts.database });
 			try {
 				const result = await index.facetShow(path);
 				if (opts.json) {
@@ -293,9 +357,10 @@ program
 		.option("-k, --k <n>", "Number of facets", "5")
 		.option("--json", "Output as JSON")
 		.option("-v, --verbose", "Show top vocab candidates per cluster")
+		.option("--database <name-or-path>", DATABASE_OPTION)
 		.action(async (path, opts) => {
 			const cwd = process.cwd();
-			const index = await createIndex({ cwd });
+			const index = await createIndex({ cwd, database: opts.database });
 			try {
 				const result = await index.facetRefine(path, {
 					k: Number.parseInt(opts.k, 10),
@@ -320,6 +385,15 @@ program
 				await index.close();
 			}
 		});
+}
+
+function formatTrace(t: TraceEntry): string {
+	switch (t.kind) {
+		case "search":
+			return `  search  "${t.query}" → ${t.hits} hits`;
+		case "note":
+			return `  · ${t.message}`;
+	}
 }
 
 function printQualified(labels: string[], qualifiers?: string[][]) {
@@ -356,9 +430,11 @@ program
 	.description("Show index stats and check embedding connectivity")
 	.option("-c, --changes", "Scan for changed files since last index")
 	.option("--json", "Output status as JSON")
+	.option("--database <name-or-path>", DATABASE_OPTION)
 	.action(async (opts) => {
 		const cwd = process.cwd();
-		const index = await createIndex({ cwd });
+		const resolved = resolveDb(cwd, opts.database);
+		const index = await createIndex({ cwd, database: opts.database });
 		const info = await index.status();
 
 		const processes = discoverRunningProcesses();
@@ -367,7 +443,9 @@ program
 			const output: Record<string, unknown> = { ...info, processes };
 			if (opts.changes) {
 				const projectRoot = info.projectRoot;
-				const projectStore = Store.forProject(projectRoot);
+				const projectStore = resolved.manual
+					? Store.forResolved(resolved)
+					: Store.forProject(projectRoot);
 				const storedFileHashes = await projectStore.getFileHashes();
 				const currentFiles = walkFiles(projectRoot);
 				const changes = computeChanges(
@@ -456,7 +534,9 @@ program
 		if (opts.changes) {
 			console.log(`\nScanning for changes...`);
 			const projectRoot = info.projectRoot;
-			const projectStore = Store.forProject(projectRoot);
+			const projectStore = resolved.manual
+				? Store.forResolved(resolved)
+				: Store.forProject(projectRoot);
 			const storedFileHashes = await projectStore.getFileHashes();
 			const currentFiles = walkFiles(projectRoot);
 			const { added, modified, deleted } = computeChanges(
@@ -516,9 +596,10 @@ program
 		"Show what would be repaired without making changes",
 	)
 	.option("--json", "Output repair results as JSON")
+	.option("--database <name-or-path>", DATABASE_OPTION)
 	.action(async (opts) => {
 		const cwd = process.cwd();
-		const index = await createIndex({ cwd });
+		const index = await createIndex({ cwd, database: opts.database });
 		const result = await index.repair(opts.dry);
 		if (opts.json) {
 			console.log(JSON.stringify(result, null, 2));
@@ -529,16 +610,19 @@ program
 program
 	.command("serve")
 	.description("Watch the current directory and re-index on changes")
-	.action(async () => {
+	.option("--database <name-or-path>", DATABASE_OPTION)
+	.action(async (opts) => {
 		const cwd = process.cwd();
-		const index = await createIndex({ cwd });
+		const index = await createIndex({ cwd, database: opts.database });
 		await index.watch();
 	});
 
 program
 	.command("mcp")
 	.description("Start the MCP server (stdio transport)")
-	.action(async () => {
+	.option("--database <name-or-path>", DATABASE_OPTION)
+	.action(async (opts) => {
+		if (opts.database) process.env.LMGREP_DATABASE = opts.database;
 		await import("./mcp.js");
 	});
 
@@ -813,12 +897,13 @@ program
 program
 	.command("compact")
 	.description("Remove duplicate/stale chunks and compact the index to reclaim disk space")
-	.action(async () => {
+	.option("--database <name-or-path>", DATABASE_OPTION)
+	.action(async (opts) => {
 		const cwd = process.cwd();
-		const store = Store.forProject(cwd);
+		const store = Store.forResolved(resolveDb(cwd, opts.database));
 		// Hold the write mutex so the cleanup's table rewrite can't race a
 		// concurrent indexer (watcher or `lmgrep index`).
-		await withWriteLock(cwd, async () => {
+		await withWriteLock(store.path, async () => {
 			const r = await store.dedupeChunks();
 			if (r.duplicateIds + r.staleVersions > 0) {
 				console.log(
@@ -837,12 +922,24 @@ program
 	.command("prune")
 	.description("Delete the index database for the current directory")
 	.option("--force", "Skip confirmation")
+	.option("--database <name-or-path>", DATABASE_OPTION)
 	.action(async (opts) => {
 		const cwd = process.cwd();
-		const dbPath = getDbPath(cwd);
+		const dbPath = resolveDb(cwd, opts.database).dbPath;
 
 		if (!existsSync(dbPath)) {
 			console.log("No index found for this directory.");
+			return;
+		}
+
+		// `--database <path>` can point anywhere, and this is a recursive
+		// delete — refuse anything that isn't recognizably an lmgrep database.
+		if (!isDatabaseDir(dbPath)) {
+			console.error(
+				`Refusing to delete ${dbPath}: not an lmgrep database ` +
+					"(no lmgrep.json or LanceDB tables). Check the --database value.",
+			);
+			process.exitCode = 1;
 			return;
 		}
 

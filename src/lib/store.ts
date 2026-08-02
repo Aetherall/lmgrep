@@ -184,6 +184,60 @@ export function getLegacyDbPath(cwd: string): string {
 	return join(homedir(), ".local", "state", "lmgrep", `${slug}-${hash}`);
 }
 
+/** A `--database` override is a path when it carries a separator. */
+function isPathLike(value: string): boolean {
+	return (
+		value.includes("/") ||
+		value.includes("\\") ||
+		value === "." ||
+		value === ".."
+	);
+}
+
+/** The fully-resolved database a command should read from / write to. */
+export interface ResolvedDb {
+	/** Absolute path to the database directory. */
+	dbPath: string;
+	/** Branch scope to read/write (`_default` for manually-targeted databases). */
+	branch: string;
+	/** Project root used for metadata and status display. */
+	root: string;
+	/** True when the database was chosen explicitly via `--database`. */
+	manual: boolean;
+}
+
+/**
+ * Resolve which database a command should target.
+ *
+ * Without an override this is the git-aware default (see `getDbPath`). With a
+ * `database` override the caller takes manual control:
+ *   - a path (contains a separator) points at a specific database directory,
+ *     resolved relative to `cwd`;
+ *   - a bare name creates an independent database alongside the others under
+ *     `~/.local/state/lmgrep/<name>`.
+ *
+ * Manually-targeted databases are flat and branch-agnostic — both indexing and
+ * search use the `_default` branch so switching git branches never hides
+ * results in a database you asked for by name or path. `cwd` still drives file
+ * scanning; only the database identity changes.
+ */
+export function resolveDb(cwd: string, database?: string): ResolvedDb {
+	if (database && database.length > 0) {
+		const dbPath = isPathLike(database)
+			? resolve(cwd, database)
+			: join(
+					homedir(),
+					".local",
+					"state",
+					"lmgrep",
+					database.replace(/[^a-zA-Z0-9_.-]/g, "_"),
+				);
+		return { dbPath, branch: "_default", root: resolve(cwd), manual: true };
+	}
+	const { root, branch } = resolveProject(cwd);
+	return { dbPath: getDbPath(cwd), branch, root, manual: false };
+}
+
 /**
  * Find the project root and compute the prefix (subdirectory offset).
  * For git repos, the root is the git toplevel. For non-git dirs, walks up
@@ -277,11 +331,12 @@ export function extractModelFamily(model: string): string {
 }
 
 export function writeProjectMetadata(
+	dbPath: string,
+	branch: string,
 	cwd: string,
 	extra?: { model?: string; dimensions?: number },
 ): void {
-	const dbPath = getDbPath(cwd);
-	const { id, root, branch } = resolveProject(cwd);
+	const { root } = resolveProject(cwd);
 	const gitRoot = git(resolve(cwd), "rev-parse", "--show-toplevel");
 	const remote = gitRoot
 		? git(gitRoot, "remote", "get-url", "origin") ?? undefined
@@ -309,6 +364,34 @@ export function readProjectMetadata(dbPath: string): ProjectMetadata | undefined
 	} catch {
 		return undefined;
 	}
+}
+
+/**
+ * Whether `dbPath` holds an lmgrep database (or is an empty directory we could
+ * safely treat as one).
+ *
+ * `--database <path>` lets a caller aim any directory at any command, so a
+ * destructive operation must confirm the target is really ours before touching
+ * it — without this, `lmgrep prune --database .` deletes the working tree. A
+ * database is identified by its metadata file or its LanceDB tables; an empty
+ * directory passes too, since that is what an interrupted `index` leaves behind
+ * and removing it cannot lose data.
+ */
+export function isDatabaseDir(dbPath: string): boolean {
+	let entries: string[];
+	try {
+		entries = readdirSync(dbPath);
+	} catch {
+		return false;
+	}
+	if (entries.length === 0) return true;
+	const markers = new Set([
+		METADATA_FILE,
+		`${CHUNKS_TABLE}.lance`,
+		`${FILES_TABLE}.lance`,
+		`${VOCAB_TABLE}.lance`,
+	]);
+	return entries.some((e) => markers.has(e));
 }
 
 /**
@@ -345,11 +428,11 @@ function isProcessAlive(pid: number): boolean {
 }
 
 /**
- * Acquire an exclusive write lock for a project's DB.
+ * Acquire an exclusive maintainer lock for a database.
  * Returns true if the lock was acquired, false if another process holds it.
  */
-export function acquireDbLock(cwd: string): boolean {
-	const lockPath = `${getDbPath(cwd)}.lock`;
+export function acquireDbLock(dbPath: string): boolean {
+	const lockPath = `${dbPath}.lock`;
 	if (existsSync(lockPath)) {
 		try {
 			const pid = Number.parseInt(
@@ -361,18 +444,17 @@ export function acquireDbLock(cwd: string): boolean {
 			// stale lock, take over
 		}
 	}
-	const dbPath = getDbPath(cwd);
 	mkdirSync(dbPath, { recursive: true });
 	writeFileSync(lockPath, `${process.pid}\n`);
 	return true;
 }
 
 /**
- * Release the write lock for a project's DB.
+ * Release the maintainer lock for a database.
  */
-export function releaseDbLock(cwd: string): void {
+export function releaseDbLock(dbPath: string): void {
 	try {
-		unlinkSync(`${getDbPath(cwd)}.lock`);
+		unlinkSync(`${dbPath}.lock`);
 	} catch {}
 }
 
@@ -387,12 +469,12 @@ export function releaseDbLock(cwd: string): void {
 // duplicate rows. Named `.writelock` (not `.write.lock`) so it does not match
 // the `.lock` suffix scan in discoverRunningProcesses.
 
-function writeLockPath(cwd: string): string {
-	return `${getDbPath(cwd)}.writelock`;
+function writeLockPath(dbPath: string): string {
+	return `${dbPath}.writelock`;
 }
 
-function tryAcquireWriteLock(cwd: string): boolean {
-	const lockPath = writeLockPath(cwd);
+function tryAcquireWriteLock(dbPath: string): boolean {
+	const lockPath = writeLockPath(dbPath);
 	if (existsSync(lockPath)) {
 		try {
 			const pid = Number.parseInt(readFileSync(lockPath, "utf-8").trim(), 10);
@@ -401,13 +483,13 @@ function tryAcquireWriteLock(cwd: string): boolean {
 			// stale/corrupt lock, take over
 		}
 	}
-	mkdirSync(getDbPath(cwd), { recursive: true });
+	mkdirSync(dbPath, { recursive: true });
 	writeFileSync(lockPath, `${process.pid}\n`);
 	return true;
 }
 
-function releaseWriteLock(cwd: string): void {
-	const lockPath = writeLockPath(cwd);
+function releaseWriteLock(dbPath: string): void {
+	const lockPath = writeLockPath(dbPath);
 	try {
 		// Only remove the lock if we still own it.
 		const pid = Number.parseInt(readFileSync(lockPath, "utf-8").trim(), 10);
@@ -416,21 +498,21 @@ function releaseWriteLock(cwd: string): void {
 }
 
 /**
- * Run `fn` while holding the project's write mutex, so concurrent indexers
+ * Run `fn` while holding a database's write mutex, so concurrent indexers
  * (a watcher plus an ad-hoc `lmgrep index`) can't write at the same time and
  * produce duplicate chunk rows. Waits up to `waitMs` for a busy lock, taking
  * over a lock held by a dead process. Throws if the lock can't be acquired in
  * time.
  */
 export async function withWriteLock<T>(
-	cwd: string,
+	dbPath: string,
 	fn: () => Promise<T>,
 	opts: { waitMs?: number; pollMs?: number } = {},
 ): Promise<T> {
 	const waitMs = opts.waitMs ?? 120_000;
 	const pollMs = opts.pollMs ?? 200;
 	let waited = 0;
-	while (!tryAcquireWriteLock(cwd)) {
+	while (!tryAcquireWriteLock(dbPath)) {
 		if (waited >= waitMs) {
 			throw new Error(
 				"Could not acquire the index write lock — another indexer is busy. " +
@@ -443,15 +525,15 @@ export async function withWriteLock<T>(
 	try {
 		return await fn();
 	} finally {
-		releaseWriteLock(cwd);
+		releaseWriteLock(dbPath);
 	}
 }
 
 /**
- * Check if a write lock is held by a live process.
+ * Check if a maintainer lock is held by a live process.
  */
-export function isDbLocked(cwd: string): boolean {
-	const lockPath = `${getDbPath(cwd)}.lock`;
+export function isDbLocked(dbPath: string): boolean {
+	const lockPath = `${dbPath}.lock`;
 	if (!existsSync(lockPath)) return false;
 	try {
 		const pid = Number.parseInt(
@@ -553,14 +635,30 @@ export class Store {
 	private filesTable: Table | undefined;
 	private vocabTable: Table | undefined;
 
-	constructor(
-		private readonly dbPath: string,
-		private readonly branch: string = "_default",
-	) {}
+	private readonly dbPath: string;
+	private readonly _branch: string;
+
+	constructor(dbPath: string, branch: string = "_default") {
+		this.dbPath = dbPath;
+		this._branch = branch;
+	}
+
+	/** Absolute path to this database's directory. */
+	get path(): string {
+		return this.dbPath;
+	}
+
+	/** Branch scope this store reads and writes (`_default` for flat indexes). */
+	get branch(): string {
+		return this._branch;
+	}
 
 	static forProject(cwd: string): Store {
-		const { branch } = resolveProject(cwd);
-		return new Store(getDbPath(cwd), branch);
+		return Store.forResolved(resolveDb(cwd));
+	}
+
+	static forResolved(resolved: ResolvedDb): Store {
+		return new Store(resolved.dbPath, resolved.branch);
 	}
 
 	// --- Connection ---
@@ -591,7 +689,7 @@ export class Store {
 		const tables = await conn.tableNames();
 		if (tables.includes(FILES_TABLE)) {
 			const t = await conn.openTable(FILES_TABLE);
-			await migrateBranchColumn(t, this.branch);
+			await migrateBranchColumn(t, this._branch);
 			this.filesTable = t;
 			return this.filesTable;
 		}
@@ -746,7 +844,7 @@ export class Store {
 		}
 
 		// Find which files are still referenced by other branches
-		const escaped = this.branch.replace(/'/g, "''");
+		const escaped = this._branch.replace(/'/g, "''");
 		const stillReferenced = new Set<string>();
 		for (let i = 0; i < filePaths.length; i += DELETE_BATCH_SIZE) {
 			const batch = filePaths.slice(i, i + DELETE_BATCH_SIZE);
@@ -779,7 +877,7 @@ export class Store {
 		if (this.branchVersionsCache) return this.branchVersionsCache;
 		const t = await this.openFiles();
 		if (!t) return undefined;
-		const escaped = this.branch.replace(/'/g, "''");
+		const escaped = this._branch.replace(/'/g, "''");
 		const rows = await t
 			.query()
 			.where(`branch = '${escaped}'`)
@@ -1023,7 +1121,7 @@ export class Store {
 		const t = await this.openFiles();
 		if (!t) return new Map();
 
-		const escaped = this.branch.replace(/'/g, "''");
+		const escaped = this._branch.replace(/'/g, "''");
 		const rows = await t
 			.query()
 			.where(`branch = '${escaped}'`)
@@ -1068,7 +1166,7 @@ export class Store {
 		const records = entries.map((e) => ({
 			filePath: e.filePath,
 			fileHash: e.fileHash,
-			branch: e.branch ?? this.branch,
+			branch: e.branch ?? this._branch,
 		}));
 
 		const conn = await this.connection();
@@ -1103,7 +1201,7 @@ export class Store {
 	async deleteFileHashes(filePaths: string[]): Promise<void> {
 		const t = await this.openFiles();
 		if (!t || filePaths.length === 0) return;
-		const escaped = this.branch.replace(/'/g, "''");
+		const escaped = this._branch.replace(/'/g, "''");
 		for (let i = 0; i < filePaths.length; i += DELETE_BATCH_SIZE) {
 			const batch = filePaths.slice(i, i + DELETE_BATCH_SIZE);
 			const pathFilter = buildInFilter("filePath", batch);
@@ -1228,7 +1326,7 @@ export class Store {
 		return rows.map((r) => ({
 			filePath: r.filePath as string,
 			fileHash: r.fileHash as string,
-			branch: (r.branch as string) ?? this.branch,
+			branch: (r.branch as string) ?? this._branch,
 		}));
 	}
 
@@ -1304,7 +1402,7 @@ export class Store {
 				const rows = rawRows.map((r) => ({
 					filePath: r.filePath,
 					fileHash: r.fileHash,
-					branch: r.branch ?? this.branch,
+					branch: r.branch ?? this._branch,
 				}));
 				const conn = await this.connection();
 				const destTables = await conn.tableNames();
@@ -1360,7 +1458,7 @@ export class Store {
 		const records = rows.map((r) => ({
 			filePath: r.filePath as string,
 			fileHash: r.fileHash as string,
-			branch: this.branch,
+			branch: this._branch,
 		}));
 
 		await t.add(records);

@@ -3,8 +3,8 @@ import { Type } from "@sinclair/typebox";
 import { createLmgrepCore, type HealthState } from "../src/lib/search-tool.ts";
 
 const SEARCH_TOOL = "lmgrep_search";
+const ASK_TOOL = "lmgrep_ask";
 const LIST_TOOL = "lmgrep_list_other_indexed_projects";
-const LMGREP_TOOLS = [SEARCH_TOOL, LIST_TOOL];
 
 function shouldShowTools(state: HealthState): boolean {
 	return state.reason !== "embedding_failed";
@@ -68,11 +68,34 @@ export default async function (pi: ExtensionAPI) {
 		},
 	});
 
+	// `ask` runs a local research loop — only registered when a chat model is
+	// configured, so the agent never sees a tool it can't use.
+	if (core.askAvailable) {
+		pi.registerTool({
+			name: ASK_TOOL,
+			label: "lmgrep ask",
+			description: core.askDescription,
+			parameters: Type.Object({
+				question: Type.String({ description: core.askParam.description }),
+			}),
+			async execute(_toolCallId, params) {
+				const result = await core.executeAsk(params);
+				if (result.isError) throw new Error(result.text);
+				return { content: [{ type: "text", text: result.text }] };
+			},
+		});
+	}
+
+	// Tools gated by embedding health (ask included only when available).
+	const gatedTools = core.askAvailable
+		? [SEARCH_TOOL, ASK_TOOL, LIST_TOOL]
+		: [SEARCH_TOOL, LIST_TOOL];
+
 	function gateActiveTools(state: HealthState): void {
 		const active = new Set(pi.getActiveTools());
 		const show = shouldShowTools(state);
 		let changed = false;
-		for (const name of LMGREP_TOOLS) {
+		for (const name of gatedTools) {
 			if (show && !active.has(name)) {
 				active.add(name);
 				changed = true;

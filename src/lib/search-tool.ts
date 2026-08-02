@@ -3,11 +3,14 @@ import { createIndex, type LmgrepIndex } from "../index.js";
 import { TreeSitterChunker } from "./chunker/index.js";
 import { loadConfig } from "./config.js";
 import { AISDKEmbedder } from "./embedder.js";
+import { AISDKGenerator } from "./generator.js";
+import { research } from "./research.js";
 import { startWatcher } from "./serve.js";
 import {
 	discoverIndexedProjects,
 	findIndexedAncestor,
 	getDbPath,
+	resolveDb,
 	Store,
 } from "./store.js";
 import { silentLogger } from "./types.js";
@@ -102,12 +105,37 @@ export const facetParamSpec: ParamSpec = {
 		"Broad, natural-language query to faceted over. Same phrasing as `search`, but use when the query is exploratory and you want to see the categories of matching code.",
 };
 
+export interface AskArgs {
+	question: string;
+}
+
+export const askParamSpec: ParamSpec = {
+	description:
+		'The question to answer, in natural language — phrase it as a real question about the code. Good: "how does the file watcher trigger reindexing", "where are webhooks authenticated and what token format", "what happens when a user is deleted".',
+};
+
+export const askDescription = [
+	"**Ask a question about this codebase and get back a synthesized, cited answer** — instead of raw search results you have to read yourself. A local model runs a short research loop (searches the index, reads the matching code, writes a grounded answer), so you spend one tool call and a paragraph instead of several searches and pages of chunks.",
+	"",
+	'**Use `ask` when you want a question *answered*:** "how does X work", "where is Y handled and what does it do", "what happens when Z", "how do these pieces fit together". The retrieval loop runs on a local model — cheap on your context.',
+	"",
+	"**Use `search` instead when you want the raw code** to read yourself (exact snippets, or to browse many hits). `ask` complements `search`; it does not replace it.",
+	"",
+	"**Every claim is cited** as `[n]` → `file:line`, listed under the answer, so you can verify or open the sources. If an answer looks off or thin, fall back to `search` for the raw chunks.",
+	"",
+	"**Tradeoff:** `ask` runs a local model, so it's slower than `search` — roughly ~10s to a couple of minutes depending on the question and hardware — but it does the searching and reading for you.",
+].join("\n");
+
 export interface LmgrepCore {
 	readonly cwd: string;
 	readonly searchParams: SearchParamSpecs;
 	readonly facetParam: ParamSpec;
 	readonly facetDescription: string;
 	readonly listProjectsDescription: string;
+	readonly askParam: ParamSpec;
+	readonly askDescription: string;
+	/** Whether a chat model is configured — `ask` is only usable when true. */
+	readonly askAvailable: boolean;
 	buildSearchDescription(): string;
 	currentHealth(): HealthState;
 	onHealthChange(cb: (state: HealthState) => void): () => void;
@@ -115,24 +143,36 @@ export interface LmgrepCore {
 	executeSearch(args: SearchArgs): Promise<ToolResult>;
 	executeFacet(args: FacetArgs): Promise<ToolResult>;
 	executeListProjects(): Promise<ToolResult>;
+	executeAsk(args: AskArgs): Promise<ToolResult>;
 	dispose(): Promise<void>;
 }
 
 export async function createLmgrepCore(opts: {
 	cwd: string;
+	database?: string;
 }): Promise<LmgrepCore> {
 	const cwd = opts.cwd;
-	const index: LmgrepIndex = await createIndex({ cwd });
+	const resolved = resolveDb(cwd, opts.database);
+	const index: LmgrepIndex = await createIndex({ cwd, database: opts.database });
+
+	// `ask` needs a generative chat model on top of the embedder; only expose it
+	// when one is configured.
+	const askAvailable = new AISDKGenerator(index.config).hasModel();
 
 	function isCurrentProjectIndexed(): boolean {
+		if (resolved.manual) return existsSync(resolved.dbPath);
 		if (findIndexedAncestor(cwd)) return true;
 		return existsSync(getDbPath(cwd));
 	}
 
 	function getOtherProjects(): Array<{ root: string; remote?: string }> {
-		const currentDb = getDbPath(cwd);
+		const currentDb = resolved.dbPath;
 		return discoverIndexedProjects()
-			.filter((p) => getDbPath(p.metadata.root) !== currentDb)
+			.filter(
+				(p) =>
+					p.dbPath !== currentDb &&
+					getDbPath(p.metadata.root) !== currentDb,
+			)
 			.map((p) => ({ root: p.metadata.root, remote: p.metadata.remote }));
 	}
 
@@ -172,7 +212,7 @@ export async function createLmgrepCore(opts: {
 		if (stopWatcher) return;
 		if (!isCurrentProjectIndexed()) return;
 		const config = loadConfig(cwd);
-		const store = Store.forProject(cwd);
+		const store = Store.forResolved(resolved);
 		const embedder = new AISDKEmbedder(config);
 		const chunker = new TreeSitterChunker();
 		stopWatcher = startWatcher(
@@ -378,6 +418,44 @@ export async function createLmgrepCore(opts: {
 		}
 	}
 
+	async function executeAsk(args: AskArgs): Promise<ToolResult> {
+		if (state.reason === "embedding_failed") {
+			return {
+				text: "lmgrep is unavailable: the embedding provider is unreachable. Ask the user to check their lmgrep configuration (`lmgrep status`) before retrying.",
+				isError: true,
+			};
+		}
+		try {
+			const result = await research({ index, cwd, question: args.question });
+			// A completed research run proves the embedder + index are healthy.
+			markHealthy();
+			stopHealthLoop();
+
+			const parts = [result.answer];
+			if (result.sources.length > 0) {
+				const src = result.sources
+					.map((s) => `[${s.n}] ${s.path}:${s.startLine}-${s.endLine}`)
+					.join("\n");
+				parts.push(`\nSources:\n${src}`);
+			}
+			const queries = result.trace.flatMap((t) =>
+				t.kind === "search" ? [`"${t.query}"`] : [],
+			);
+			const meta = `${result.steps} steps, ${(result.elapsedMs / 1000).toFixed(0)}s${result.degraded ? ", degraded" : ""}`;
+			parts.push(
+				queries.length > 0
+					? `\n(searched ${queries.join(", ")} · ${meta})`
+					: `\n(${meta})`,
+			);
+			return { text: parts.join("\n") };
+		} catch (err) {
+			// research() degrades internally for provider/search errors; it only
+			// throws when no chat model is configured — surface that verbatim.
+			const msg = err instanceof Error ? err.message : String(err);
+			return { text: `Error: ${msg}`, isError: true };
+		}
+	}
+
 	async function executeListProjects(): Promise<ToolResult> {
 		const others = getOtherProjects();
 		if (others.length === 0) {
@@ -406,6 +484,9 @@ export async function createLmgrepCore(opts: {
 		facetParam: facetParamSpec,
 		facetDescription,
 		listProjectsDescription,
+		askParam: askParamSpec,
+		askDescription,
+		askAvailable,
 		buildSearchDescription,
 		currentHealth: () => state,
 		onHealthChange(cb) {
@@ -416,6 +497,7 @@ export async function createLmgrepCore(opts: {
 		executeSearch,
 		executeFacet,
 		executeListProjects,
+		executeAsk,
 		dispose,
 	};
 }

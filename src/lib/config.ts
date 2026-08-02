@@ -17,6 +17,14 @@ const ConfigSchema = z.object({
 	queryPrefix: z.string().optional(),
 	documentPrefix: z.string().optional(),
 	maxTokens: z.number().int().positive().optional(),
+	chatModel: z
+		.string()
+		.regex(/^.+:.+$/, 'chatModel must be in "provider:model" format (e.g. "lmstudio:qwen/qwen3.5-9b")')
+		.optional(),
+	chatProvider: z.string().optional(),
+	chatBaseURL: z.string().url().optional(),
+	chatMaxSteps: z.number().int().positive().optional(),
+	chatTimeoutMs: z.number().int().positive().optional(),
 	ignore: z.array(z.string()).optional(),
 	extensions: z
 		.object({
@@ -61,25 +69,41 @@ function tryLoadFile(path: string): Partial<LmgrepConfig> | undefined {
 }
 
 export function loadConfig(cwd: string): LmgrepConfig {
-	// Project-local config (.lmgrep.yml in project root)
+	// Layered config: later layers override earlier ones field by field, so a
+	// global config can hold shared settings (e.g. `chatModel`) while a project
+	// `.lmgrep.yml` overrides only what it needs (e.g. the embedding `model`).
+	// Precedence: project > global > legacy home > DEFAULTS.
+	const layers: Array<Partial<LmgrepConfig>> = [];
+
+	// Legacy: ~/.lmgrep.yml (lowest priority, backwards compat)
 	for (const name of [".lmgrep.yml", ".lmgrep.yaml"]) {
-		const found = tryLoadFile(join(cwd, name));
-		if (found) return validateConfig({ ...DEFAULTS, ...found });
+		const found = tryLoadFile(join(homedir(), name));
+		if (found) {
+			layers.push(found);
+			break;
+		}
 	}
 
 	// Global config (XDG config dir)
 	const globalConfig = tryLoadFile(getGlobalConfigPath());
-	if (globalConfig) return validateConfig({ ...DEFAULTS, ...globalConfig });
+	if (globalConfig) layers.push(globalConfig);
 
-	// Legacy: ~/.lmgrep.yml (for backwards compat)
+	// Project-local config (.lmgrep.yml in project root, highest priority)
 	for (const name of [".lmgrep.yml", ".lmgrep.yaml"]) {
-		const found = tryLoadFile(join(homedir(), name));
-		if (found) return validateConfig({ ...DEFAULTS, ...found });
+		const found = tryLoadFile(join(cwd, name));
+		if (found) {
+			layers.push(found);
+			break;
+		}
 	}
 
-	throw new Error(
-		"No configuration found. Run `lmgrep init` to set up your embedding model.",
-	);
+	if (layers.length === 0) {
+		throw new Error(
+			"No configuration found. Run `lmgrep init` to set up your embedding model.",
+		);
+	}
+
+	return validateConfig(Object.assign({ ...DEFAULTS }, ...layers));
 }
 
 function validateConfig(

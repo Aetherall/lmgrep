@@ -349,7 +349,7 @@ export async function startImport(
 					}
 					case "done": {
 						sendMsg(socket, key, { type: "ack" });
-						writeProjectMetadata(opts.cwd);
+						writeProjectMetadata(store.path, store.branch, opts.cwd);
 						cleanup().then(() =>
 							resolve({ chunks: receivedChunks, files: receivedFiles }),
 						);

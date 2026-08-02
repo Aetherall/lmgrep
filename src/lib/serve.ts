@@ -4,6 +4,7 @@ import type { Embedder } from "./embedder.js";
 import { watchFiles } from "./scanner.js";
 import {
 	type Store,
+	type ResolvedDb,
 	getDbPath,
 	findIndexedAncestor,
 	acquireDbLock,
@@ -30,24 +31,30 @@ export async function serve(
 	config: LmgrepConfig,
 	embedder: Embedder,
 	chunker: Chunker,
+	resolved: ResolvedDb,
 	logger: Logger = consoleLogger,
 ): Promise<void> {
 	const log = logger.info.bind(logger);
 
 	// Require an existing index
-	const ancestor = findIndexedAncestor(cwd);
-	if (!ancestor) {
-		const dbPath = getDbPath(cwd);
-		if (!existsSync(dbPath)) {
+	if (resolved.manual) {
+		if (!existsSync(store.path)) {
+			throw new Error(
+				"No index found. Run `lmgrep index --database <name|path>` first.",
+			);
+		}
+	} else {
+		const ancestor = findIndexedAncestor(cwd);
+		if (!ancestor && !existsSync(getDbPath(cwd))) {
 			throw new Error("No index found. Run `lmgrep index` first.");
 		}
 	}
 
-	if (!acquireDbLock(cwd)) {
+	if (!acquireDbLock(store.path)) {
 		throw new Error("Already running for this project.");
 	}
 
-	const cleanup = () => releaseDbLock(cwd);
+	const cleanup = () => releaseDbLock(store.path);
 	process.on("exit", cleanup);
 	process.on("SIGINT", () => {
 		cleanup();
@@ -132,7 +139,7 @@ export function startWatcher(
 	chunker: Chunker,
 	logger: Logger = consoleLogger,
 ): (() => void) | undefined {
-	if (!acquireDbLock(cwd)) {
+	if (!acquireDbLock(store.path)) {
 		return undefined;
 	}
 
@@ -206,6 +213,6 @@ export function startWatcher(
 	return () => {
 		clearInterval(reconcileTimer);
 		watcher.close();
-		releaseDbLock(cwd);
+		releaseDbLock(store.path);
 	};
 }
