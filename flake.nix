@@ -18,7 +18,7 @@
         pnpmDeps = pkgs.fetchPnpmDeps {
           pname = "lmgrep";
           version = "0.1.0";
-          inherit src;
+          inherit src pnpm;
           hash = "sha256-kq4o/JUBoDo2lM4yJSAobn03Emiu9xXutcu1LEQ03SY=";
           fetcherVersion = 3;
         };
@@ -26,7 +26,7 @@
         commonBuildInputs = [
           nodejs
           pnpm
-          pkgs.pnpmConfigHook
+          pnpm.configHook
         ];
 
         lmgrep = pkgs.stdenv.mkDerivation {
