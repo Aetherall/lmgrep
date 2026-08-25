@@ -2,6 +2,7 @@ import type { LmgrepConfig } from "../domain/config/LmgrepConfig.js";
 import type { ChunkerPort } from "../domain/ports/ChunkerPort.js";
 import type { EmbedderPort } from "../domain/ports/EmbedderPort.js";
 import type { LoggerPort } from "../domain/ports/LoggerPort.js";
+import { ModelIdentity } from "../domain/project/ModelIdentity.js";
 import { ProjectLocator } from "../domain/project/ProjectLocator.js";
 import { AiSdkChatModel } from "../infrastructure/ai/AiSdkChatModel.js";
 import { AiSdkEmbedder } from "../infrastructure/ai/AiSdkEmbedder.js";
@@ -10,6 +11,7 @@ import { ConfigLoader } from "../infrastructure/fs/ConfigLoader.js";
 import { DatabaseLocks } from "../infrastructure/fs/DatabaseLocks.js";
 import { ConsoleLogger } from "../infrastructure/fs/Loggers.js";
 import { ProjectMetadataStore } from "../infrastructure/fs/ProjectMetadataStore.js";
+import { ProjectRegistry } from "../infrastructure/fs/ProjectRegistry.js";
 import { StateDirectory } from "../infrastructure/fs/StateDirectory.js";
 import { Workspace } from "../infrastructure/fs/Workspace.js";
 import { GitClient } from "../infrastructure/git/GitClient.js";
@@ -22,7 +24,6 @@ import { BranchBootstrapper } from "./indexing/BranchBootstrapper.js";
 import { BranchManifestSweeper } from "./indexing/BranchManifestSweeper.js";
 import { IndexBuilder } from "./indexing/IndexBuilder.js";
 import { Lmgrep, type LmgrepServices } from "./Lmgrep.js";
-import { RepairService } from "./operations/RepairService.js";
 import { StatusService } from "./operations/StatusService.js";
 import { WatchService } from "./operations/WatchService.js";
 import { ResearchAgent } from "./research/ResearchAgent.js";
@@ -43,6 +44,12 @@ export interface LmgrepOptions {
 	embedder?: EmbedderPort;
 	chunker?: ChunkerPort;
 	logger?: LoggerPort;
+	/**
+	 * Where configuration problems go. Separate from the logger because these
+	 * are reported before anything is wired, and because the MCP server must
+	 * silence them — stdout is its transport.
+	 */
+	onWarning?: (message: string) => void;
 }
 
 /**
@@ -57,17 +64,31 @@ export class LmgrepFactory {
 		const { cwd } = options;
 		const logger = options.logger ?? new ConsoleLogger();
 
+		const loader = new ConfigLoader();
 		const config: LmgrepConfig = {
-			...new ConfigLoader().load(cwd),
+			...loader.load(cwd),
 			...options.config,
 		};
+		for (const warning of loader.warnings) options.onWarning?.(warning);
 
 		const state = new StateDirectory();
 		const git = new GitClient();
-		const locator = new ProjectLocator(git, state);
+		// The model partitions the databases, so it has to be known before a
+		// location can be resolved — which is why config loads first.
+		const locator = new ProjectLocator(
+			git,
+			state,
+			ModelIdentity.of(config.model),
+			config.dimensions,
+		);
 		const location = locator.resolveDatabase(cwd, options.database);
-		const metadata = new ProjectMetadataStore(state);
-		const locks = new DatabaseLocks(location.path, location.root);
+		const metadata = new ProjectMetadataStore();
+		const registry = new ProjectRegistry(state);
+		const locks = new DatabaseLocks(
+			state.locksDirectory(),
+			location.path,
+			location.root,
+		);
 
 		const tables = new LanceTables(location.path, location.branch);
 		const manifest = new FileManifestRepository(tables, location.branch);
@@ -104,6 +125,22 @@ export class LmgrepFactory {
 					dimensions,
 				});
 			},
+			// The sidecar says what this database is; the registry says that
+			// it exists. Nothing walks the filesystem looking for databases
+			// now that they live inside repositories, so an index that is
+			// never registered is one `lmgrep projects` and cross-project
+			// search cannot see.
+			registerIndex: () => {
+				const project = locator.resolveProject(cwd);
+				registry.record({
+					root: locator.projectRootFor(cwd),
+					name: location.manual ? options.database : undefined,
+					remote: project.remote,
+					databasePath: location.path,
+					model: config.model,
+					dimensions: metadata.read(location.path)?.dimensions,
+				});
+			},
 			reloadModel: () => reloader.reload(),
 			isLocalProvider: reloader.isLocal,
 		});
@@ -133,12 +170,12 @@ export class LmgrepFactory {
 			manifest,
 			maintenance,
 			metadata,
+			registry,
 			embedder,
 			chunker,
 			builder,
 			sweeper,
 			searcher,
-			repairer: new RepairService(workspace, chunks, manifest, logger),
 			statusReporter: new StatusService(
 				chunks,
 				maintenance,
@@ -148,6 +185,7 @@ export class LmgrepFactory {
 				location,
 				config,
 				cwd,
+				loader.sources,
 			),
 			watcher: new WatchService(builder, workspace, config, cwd, logger, locks),
 			researcher: new ResearchAgent(

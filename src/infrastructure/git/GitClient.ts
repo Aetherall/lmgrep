@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { resolve } from "node:path";
 import type { GitPort } from "../../domain/ports/GitPort.js";
 
 /**
@@ -13,6 +14,17 @@ export class GitClient implements GitPort {
 
 	toplevel(cwd: string): string | undefined {
 		return this.run(cwd, "rev-parse", "--show-toplevel");
+	}
+
+	/**
+	 * `--git-common-dir` reports a path *relative to the invocation directory*
+	 * (`../../.git` from a subdirectory), so it is resolved against that
+	 * directory rather than used as given. `--path-format=absolute` would do
+	 * the same but only on git 2.31 and later.
+	 */
+	commonDir(cwd: string): string | undefined {
+		const out = this.run(cwd, "rev-parse", "--git-common-dir");
+		return out === undefined ? undefined : resolve(cwd, out);
 	}
 
 	currentBranch(repoRoot: string): string | undefined {

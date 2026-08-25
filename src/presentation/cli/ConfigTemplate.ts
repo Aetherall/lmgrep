@@ -18,6 +18,10 @@ export interface DetectedSettings {
  * Every optional setting is present but commented out. That is deliberate: it
  * doubles as the reference documentation a user actually reads, so an option
  * they never knew existed is one line away rather than in a README.
+ *
+ * Only machine settings appear here. `ignore` and `extensions` describe a
+ * repository and belong in its `.lmgrep.yml`, where they can be committed and
+ * mean the same thing on every machine that checks it out.
  */
 export class ConfigTemplate {
 	static render(detected?: DetectedSettings): string {
@@ -51,7 +55,14 @@ export class ConfigTemplate {
 			? `chatModel: ${detected.chatModel}`
 			: "# chatModel: lmstudio:qwen/qwen3.5-9b";
 
-		return `# lmgrep configuration
+		return `# lmgrep — this machine's inference setup.
+#
+# These settings say which local models to use and where they listen. They are
+# not per project: each model keeps its own index, so changing \`model\` here
+# selects a different database rather than invalidating an existing one.
+#
+# Per-repository settings (ignore patterns, file extensions) go in a
+# .lmgrep.yml inside that repository.
 #
 # Quick start with Ollama:
 #   1. Install: curl -fsSL https://ollama.com/install.sh | sh
@@ -83,16 +94,6 @@ ${detected?.dimensions ? `dimensions: ${detected.dimensions}` : "# dimensions: 3
 
 # Optional: max tokens per chunk (estimated at 4 chars/token)
 ${detected?.maxTokens ? `maxTokens: ${detected.maxTokens}` : "# maxTokens: 8192"}
-
-# Optional: additional ignore patterns (merged with .gitignore)
-# ignore:
-#   - "*.generated.ts"
-#   - "fixtures/"
-
-# Optional: extra file extensions to index
-# extensions:
-#   include: [".sql", ".graphql", ".proto"]
-#   exclude: [".json"]
 `;
 	}
 }

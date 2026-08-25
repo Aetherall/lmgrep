@@ -46,6 +46,14 @@ export interface IndexBuilderDependencies {
 	locks: LockPort;
 	/** Records the model and dimensions this run indexed with. */
 	recordMetadata: (dimensions: number | undefined) => void;
+	/**
+	 * Announces that this database exists, so it can be listed and searched
+	 * from elsewhere. Separate from {@link recordMetadata} because that one
+	 * needs a vector width and therefore only runs when something was actually
+	 * embedded — a repository indexed once and never changed again would
+	 * otherwise never appear anywhere.
+	 */
+	registerIndex: () => void;
 	/** Reloads a wedged local model mid-run; false when not possible. */
 	reloadModel: () => Promise<boolean>;
 	isLocalProvider: boolean;
@@ -76,6 +84,7 @@ export class IndexBuilder {
 			// places, all of them reachable on a repo that never changes.
 			if (!options.dry) {
 				await this.deps.sweeper.sweep(this.deps.location.root);
+				this.deps.registerIndex();
 			}
 			return result;
 		});
@@ -105,7 +114,6 @@ export class IndexBuilder {
 			files,
 			manifest,
 			this.deps.location.root,
-			options.force,
 		);
 
 		// Deletions are handled before the early returns below: a run where
@@ -121,25 +129,25 @@ export class IndexBuilder {
 					? "No changes to index."
 					: "No changes detected. Index is up to date.",
 			);
-			return { succeeded: 0, failed: 0 };
+			return { succeeded: 0, failed: 0, removed };
 		}
 
 		const fresh = await this.registerAlreadyKnownContent(changed);
 		if (fresh.length === 0) {
 			logger.info("No new content to index.");
-			return { succeeded: 0, failed: 0 };
+			return { succeeded: 0, failed: 0, removed };
 		}
 
 		const chunks = await this.chunkAll(fresh, options);
 		if (chunks.length === 0) {
 			logger.info("No chunks produced. Index is up to date.");
-			return { succeeded: 0, failed: 0 };
+			return { succeeded: 0, failed: 0, removed };
 		}
 
 		const changedPaths = fresh.map((f) => f.path);
 		if (options.dry) {
 			for (const path of changedPaths) logger.info(`  ${path}`);
-			return { succeeded: 0, failed: 0 };
+			return { succeeded: 0, failed: 0, removed };
 		}
 
 		// Drop the previous version's chunks before writing the new ones, or
@@ -150,10 +158,13 @@ export class IndexBuilder {
 		if (toEmbed.length === 0) {
 			await this.commitFiles(changedPaths, current);
 			logger.info("All chunks already indexed.");
-			return { succeeded: 0, failed: 0 };
+			return { succeeded: 0, failed: 0, removed };
 		}
 
-		return this.embedAndStore(toEmbed, changedPaths, current, options);
+		return {
+			...(await this.embedAndStore(toEmbed, changedPaths, current, options)),
+			removed,
+		};
 	}
 
 	/**
@@ -230,7 +241,7 @@ export class IndexBuilder {
 		} else if (completeScan && !manifest.isEmpty) {
 			this.deps.logger.info(
 				"Scan found no files; skipping deletion check. " +
-					"Run `lmgrep repair` if the working tree really is empty.",
+					"Run `lmgrep index --reset` if the working tree really is empty.",
 			);
 		}
 
@@ -425,7 +436,7 @@ export class IndexBuilder {
 		this.deps.recordMetadata(dimensions);
 		await this.runMaintenance(succeeded, options);
 
-		return { succeeded, failed: failedIndices.size };
+		return { succeeded, failed: failedIndices.size, removed: 0 };
 	}
 
 	/** Commit files whose every chunk is now embedded and persisted. */

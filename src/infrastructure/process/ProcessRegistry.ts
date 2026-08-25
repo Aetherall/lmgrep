@@ -2,7 +2,6 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { StateDirectoryPort } from "../../domain/ports/StateDirectoryPort.js";
 import { PidFileLock } from "../fs/PidFileLock.js";
-import type { ProjectMetadataStore } from "../fs/ProjectMetadataStore.js";
 
 /** What kind of lmgrep invocation a process is. */
 export type ProcessKind = "mcp" | "serve" | "cli";
@@ -14,8 +13,10 @@ export interface RunningProcess {
 	processName: string;
 	cmdline: string;
 	kind: ProcessKind;
-	/** Project root taken from the held index's metadata. */
+	/** Working tree this process watches. */
 	projectRoot?: string;
+	/** Database it holds. */
+	databasePath?: string;
 	/** Whether this process is watching the index for changes. */
 	watching: boolean;
 }
@@ -24,36 +25,22 @@ export interface RunningProcess {
  * Discovers which lmgrep processes are alive and what they hold.
  *
  * Maintainer lock files double as the registry: each records its owner's pid,
- * so scanning them and testing liveness gives an accurate picture without any
- * separate bookkeeping that could drift from reality.
+ * worktree and database, so scanning them and testing liveness gives an
+ * accurate picture without any separate bookkeeping that could drift from
+ * reality.
  */
 export class ProcessRegistry {
 	private static readonly LOCK_SUFFIX = ".lock";
-	/** Separates the database slug from the worktree digest in a lock name. */
-	private static readonly WORKTREE_SEPARATOR = "@";
 
-	constructor(
-		private readonly state: StateDirectoryPort,
-		private readonly metadata: ProjectMetadataStore,
-	) {}
+	constructor(private readonly state: StateDirectoryPort) {}
 
 	discoverRunning(): RunningProcess[] {
-		const base = this.state.root();
-		let entries: string[];
-		try {
-			entries = readdirSync(base);
-		} catch {
-			return [];
-		}
-
 		const results: RunningProcess[] = [];
 		// One process can hold several databases; report it once.
 		const seen = new Set<number>();
 
-		for (const entry of entries) {
-			if (!entry.endsWith(ProcessRegistry.LOCK_SUFFIX)) continue;
-
-			const owner = new PidFileLock(join(base, entry)).read();
+		for (const path of this.lockFiles()) {
+			const owner = new PidFileLock(path).read();
 			if (owner === undefined) continue;
 			if (!PidFileLock.isAlive(owner.pid) || seen.has(owner.pid)) continue;
 			seen.add(owner.pid);
@@ -69,11 +56,9 @@ export class ProcessRegistry {
 				// The lock records the worktree its owner actually watches,
 				// which is what the user wants to see — several worktrees can
 				// share one database, so the database's own recorded root
-				// would name the wrong tree. Older locks carry no root, so
-				// fall back to the database metadata for those.
-				projectRoot:
-					owner.root ??
-					this.metadata.read(this.databasePathFor(base, entry))?.root,
+				// would name the wrong tree.
+				projectRoot: owner.root,
+				databasePath: owner.database,
 				// Every lock in this scan is a maintainer lock, and only a
 				// watcher ever takes one — so holding it *is* watching. This
 				// used to be inferred from the command line, which cannot
@@ -88,14 +73,29 @@ export class ProcessRegistry {
 	}
 
 	/**
-	 * The database a lock belongs to. Maintainer locks are named
-	 * `<database>@<worktree-digest>.lock`; anything before the separator is the
-	 * database directory.
+	 * Lock files, from the locks directory and from the state root.
+	 *
+	 * The root is scanned too because a watcher started before locks moved is
+	 * still running and still holds its database — reporting "no running
+	 * processes" right after an upgrade would be wrong in exactly the moment
+	 * someone is most likely to check.
 	 */
-	private databasePathFor(base: string, entry: string): string {
-		const name = entry.slice(0, -ProcessRegistry.LOCK_SUFFIX.length);
-		const separator = name.lastIndexOf(ProcessRegistry.WORKTREE_SEPARATOR);
-		return join(base, separator === -1 ? name : name.slice(0, separator));
+	private lockFiles(): string[] {
+		const out: string[] = [];
+		for (const directory of [this.state.locksDirectory(), this.state.root()]) {
+			let entries: string[];
+			try {
+				entries = readdirSync(directory);
+			} catch {
+				continue;
+			}
+			for (const entry of entries) {
+				if (entry.endsWith(ProcessRegistry.LOCK_SUFFIX)) {
+					out.push(join(directory, entry));
+				}
+			}
+		}
+		return out;
 	}
 
 	private inspect(pid: number): { name: string; cmdline: string } | undefined {

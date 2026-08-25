@@ -4,8 +4,7 @@ import { AskCommand } from "./commands/AskCommand.js";
 import { CompletionsCommand } from "./commands/CompletionsCommand.js";
 import { ConfigCommands } from "./commands/ConfigCommands.js";
 import { IndexCommand } from "./commands/IndexCommand.js";
-import { MaintenanceCommands } from "./commands/MaintenanceCommands.js";
-import { MigrateCommand } from "./commands/MigrateCommand.js";
+import { ProjectsCommand } from "./commands/ProjectsCommand.js";
 import { SearchCommand } from "./commands/SearchCommand.js";
 import { ServerCommands } from "./commands/ServerCommands.js";
 import { ShareCommands } from "./commands/ShareCommands.js";
@@ -19,19 +18,37 @@ interface Registrable {
 /**
  * Assembles and runs the command-line interface.
  *
- * Commands are objects that register themselves, so adding one is a single
- * entry in {@link commands} rather than another few hundred lines in one file.
+ * Two things here are deliberate. A bare `lmgrep <words>` searches, because
+ * searching is what lmgrep is for and it should not cost a subcommand. And the
+ * help is grouped, because a flat list of a dozen commands says nothing about
+ * which two anyone actually needs — the first group is the whole product, and
+ * the rest is setup you do once.
  */
 export class Cli {
+	/** Help grouping, by command name. Order here is order in `--help`. */
+	private static readonly GROUPS: ReadonlyArray<[string, readonly string[]]> = [
+		["Searching:", ["search", "ask"]],
+		["Your projects:", ["index", "status", "projects"]],
+		["Setup:", ["init", "config", "mcp", "completions"]],
+		["Other:", ["serve", "share", "import"]],
+	];
+
 	private readonly program = new Command();
 
 	constructor(private readonly context = new CommandContext()) {
 		this.program
 			.name("lmgrep")
-			.description("Semantic code search with any AI embedding provider")
-			.version("0.1.0");
+			.description("Semantic code search, powered by a local embedding model")
+			.version("0.1.0")
+			.showHelpAfterError()
+			.addHelpText(
+				"after",
+				"\nA bare query searches:  lmgrep how are webhooks authenticated" +
+					"\nFirst time here:        lmgrep init  →  lmgrep index",
+			);
 
 		for (const command of this.commands()) command.register(this.program);
+		this.group();
 	}
 
 	async run(argv: string[] = process.argv): Promise<void> {
@@ -43,7 +60,7 @@ export class Cli {
 		}
 
 		try {
-			await this.program.parseAsync(argv);
+			await this.program.parseAsync(this.withImplicitSearch(argv));
 		} catch (err) {
 			// Every failure reaching here is a user-facing condition — no
 			// index, an unreachable provider, incompatible embeddings — not a
@@ -51,6 +68,42 @@ export class Cli {
 			// would only bury it. Guarding once here means no command can
 			// forget to.
 			this.context.fail(err);
+		}
+	}
+
+	/**
+	 * Treat a leading word that is not a command as the start of a query.
+	 *
+	 * The ambiguity is real but small: `lmgrep status` is the command, not a
+	 * search for the word "status". Anything of more than one word, and
+	 * anything that is not a command name, searches — which covers every query
+	 * a person would actually type.
+	 */
+	private withImplicitSearch(argv: string[]): string[] {
+		const rest = argv.slice(2);
+		const first = rest[0];
+		if (!first || first.startsWith("-")) return argv;
+		if (this.commandNames().has(first)) return argv;
+		return [...argv.slice(0, 2), "search", ...rest];
+	}
+
+	private commandNames(): Set<string> {
+		const names = new Set<string>(["help"]);
+		for (const command of this.program.commands) {
+			names.add(command.name());
+			for (const alias of command.aliases()) names.add(alias);
+		}
+		return names;
+	}
+
+	private group(): void {
+		const groupOf = new Map<string, string>();
+		for (const [group, names] of Cli.GROUPS) {
+			for (const name of names) groupOf.set(name, group);
+		}
+		for (const command of this.program.commands) {
+			const group = groupOf.get(command.name());
+			if (group) command.helpGroup(group);
 		}
 	}
 
@@ -64,15 +117,14 @@ export class Cli {
 
 	private commands(): Registrable[] {
 		return [
-			new IndexCommand(this.context),
 			new SearchCommand(this.context),
 			new AskCommand(this.context),
+			new IndexCommand(this.context),
 			new StatusCommand(this.context),
-			new MaintenanceCommands(this.context),
+			new ProjectsCommand(this.context),
+			new ConfigCommands(this.context),
 			new ServerCommands(this.context),
 			new ShareCommands(this.context),
-			new ConfigCommands(this.context),
-			new MigrateCommand(this.context),
 			new CompletionsCommand(this.context),
 		];
 	}

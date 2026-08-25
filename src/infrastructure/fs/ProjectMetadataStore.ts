@@ -1,11 +1,7 @@
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { IndexMetadataPort } from "../../domain/ports/IndexMetadataPort.js";
-import type { StateDirectoryPort } from "../../domain/ports/StateDirectoryPort.js";
-import type {
-	DiscoveredIndex,
-	IndexMetadata,
-} from "../../domain/project/IndexMetadata.js";
+import type { IndexMetadata } from "../../domain/project/IndexMetadata.js";
 import { TableName } from "../lancedb/LanceTables.js";
 
 /**
@@ -17,8 +13,6 @@ import { TableName } from "../lancedb/LanceTables.js";
  */
 export class ProjectMetadataStore implements IndexMetadataPort {
 	private static readonly FILE = "lmgrep.json";
-
-	constructor(private readonly state: StateDirectoryPort) {}
 
 	read(databasePath: string): IndexMetadata | undefined {
 		try {
@@ -83,15 +77,5 @@ export class ProjectMetadataStore implements IndexMetadataPort {
 			`${TableName.LegacyVocab}.lance`,
 		]);
 		return entries.some((e) => markers.has(e));
-	}
-
-	/** Every index in the state directory that carries readable metadata. */
-	discoverAll(): DiscoveredIndex[] {
-		const out: DiscoveredIndex[] = [];
-		for (const databasePath of this.state.listDatabaseDirectories()) {
-			const metadata = this.read(databasePath);
-			if (metadata) out.push({ databasePath, metadata });
-		}
-		return out;
 	}
 }

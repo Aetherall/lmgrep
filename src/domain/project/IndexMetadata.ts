@@ -15,9 +15,3 @@ export interface IndexMetadata {
 	/** Embedding vector dimensions. */
 	dimensions?: number;
 }
-
-/** An index directory paired with the metadata found inside it. */
-export interface DiscoveredIndex {
-	databasePath: string;
-	metadata: IndexMetadata;
-}

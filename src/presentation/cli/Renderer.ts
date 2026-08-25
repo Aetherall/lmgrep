@@ -1,6 +1,9 @@
+import type { TidyReport } from "../../application/Lmgrep.js";
+import type { Inventory } from "../../application/operations/IndexInventory.js";
 import type { StatusInfo } from "../../application/operations/StatusService.js";
 import type { TraceEntry } from "../../domain/research/ResearchTrace.js";
 import type { Hit } from "../../domain/retrieval/Hit.js";
+import { DiskUsage } from "../../infrastructure/fs/DiskUsage.js";
 import type { RunningProcess } from "../../infrastructure/process/ProcessRegistry.js";
 
 /**
@@ -27,10 +30,16 @@ export class Renderer {
 		this.out(JSON.stringify(value, null, 2));
 	}
 
-	/** Full result view: a ruled header, the context block, then the source. */
-	hits(hits: readonly Hit[], options: { scores?: boolean } = {}): void {
+	/**
+	 * Full result view: a ruled header, the context block, then the source.
+	 *
+	 * The score is always shown. It used to be behind `--scores`, which meant
+	 * the one number that says how much to trust a result was hidden by
+	 * default and cost a flag to see.
+	 */
+	hits(hits: readonly Hit[]): void {
 		for (const hit of hits) {
-			const score = options.scores ? ` (score: ${hit.score.toFixed(3)})` : "";
+			const score = ` (${hit.score.toFixed(3)})`;
 			this.out(`\n${"─".repeat(Renderer.RULE_WIDTH)}`);
 			this.out(`${hit.location} [${hit.type}] ${hit.name}${score}`);
 			this.rule();
@@ -57,16 +66,55 @@ export class Renderer {
 			: `  · ${entry.message}`;
 	}
 
+	/**
+	 * The verdict, first and alone.
+	 *
+	 * Everything below it is detail for when the answer is "no". This line is
+	 * the whole reason to run the command.
+	 */
+	statusVerdict(info: StatusInfo): void {
+		if (!info.verdict.searchable) {
+			this.out(`Not searchable — ${info.verdict.reason}`);
+			this.out(`  Fix: ${info.verdict.fix}`);
+			return;
+		}
+		this.out("Searchable.");
+		if (info.verdict.note) this.out(`  Note: ${info.verdict.note}`);
+	}
+
 	/** Configuration and paths — shown even when there is no index yet. */
 	statusHeader(info: StatusInfo): void {
-		this.out(`Project root: ${info.projectRoot}`);
+		this.out(`\nProject: ${info.projectRoot}`);
 		if (info.prefix) this.out(`Subdirectory: ${info.prefix}`);
-		this.out(`Model: ${info.config.model}`);
-		if (info.config.provider) this.out(`Provider: ${info.config.provider}`);
-		if (info.config.baseURL) this.out(`Base URL: ${info.config.baseURL}`);
-		this.out(`Batch size: ${info.config.batchSize}`);
-		if (info.config.maxTokens) {
-			this.out(`Max tokens: ${info.config.maxTokens}`);
+		this.out(`Index:   ${info.databasePath}`);
+		this.out(`Model:   ${info.config.model}`);
+		if (info.config.baseURL) this.out(`Server:  ${info.config.baseURL}`);
+	}
+
+	/**
+	 * Which file supplied which settings.
+	 *
+	 * Worth a section of its own because the alternative is guessing. With two
+	 * files able to set the same key, an effective value printed on its own
+	 * tells you what lmgrep decided but not where to go to change it — which
+	 * is the actual question when the answer surprises you.
+	 */
+	statusConfig(info: StatusInfo): void {
+		this.out("\nConfiguration:");
+		if (info.configSources.length === 0) {
+			this.out("  (none — defaults only)");
+			return;
+		}
+		for (const source of info.configSources) {
+			const marks = [
+				source.scope === "project" ? "project" : "machine",
+				source.deprecated ? "deprecated location" : undefined,
+			].filter(Boolean);
+			this.out(`  ${source.path}  [${marks.join(", ")}]`);
+			this.out(`    ${source.keys.join(", ") || "(nothing applied)"}`);
+		}
+		if (info.configSources.length > 1) {
+			this.out("  Later files override earlier ones, key by key.");
 		}
 	}
 
@@ -110,7 +158,7 @@ export class Renderer {
 		}
 		this.out(
 			"  Vector index: MISSING — every search scans all " +
-				`${state.rows} embeddings. Run \`lmgrep compact\` to build it.`,
+				`${state.rows} embeddings. Run \`lmgrep index\` to build it.`,
 		);
 	}
 
@@ -183,6 +231,78 @@ export class Renderer {
 		for (const f of files.slice(0, SHOWN)) this.out(`    ${marker} ${f}`);
 		if (files.length > SHOWN) {
 			this.out(`    ... and ${files.length - SHOWN} more`);
+		}
+	}
+
+	/** What a maintenance pass changed; silent when it changed nothing. */
+	maintenance(report: TidyReport): void {
+		const { duplicateIds, staleVersions, before, after } = report.deduped;
+		if (duplicateIds + staleVersions > 0) {
+			this.out(
+				`Removed ${duplicateIds} duplicate and ${staleVersions} superseded chunks (${before} → ${after}).`,
+			);
+		}
+		for (const table of report.optimized.tables) {
+			if (table.action === "created") {
+				this.out(`Built vector index on ${table.table} (${table.rows} rows).`);
+			} else if (table.action === "dropped") {
+				this.out(
+					`Dropped the unused ${table.table} table (${table.rows} rows).`,
+				);
+			}
+		}
+	}
+
+	/**
+	 * Every index on this machine.
+	 *
+	 * Sorted by size and leading with the total, because the question this
+	 * answers is almost always "what is using my disk, and can I delete it".
+	 */
+	inventory(inventory: Inventory): void {
+		if (inventory.entries.length === 0) {
+			this.out(
+				"No indexes on this machine yet. Run `lmgrep index` in a project.",
+			);
+			return;
+		}
+
+		for (const entry of inventory.entries) {
+			const marks = [
+				entry.kind === "legacy" ? "legacy" : undefined,
+				entry.name ? "standalone" : undefined,
+				entry.rootExists ? undefined : "project gone",
+			].filter(Boolean);
+			this.out(
+				`${DiskUsage.format(entry.bytes).padStart(7)}  ${entry.name ?? entry.root ?? "(unknown project)"}` +
+					(marks.length > 0 ? `  [${marks.join(", ")}]` : ""),
+			);
+			this.out(
+				`         ${entry.model ?? "unknown model"}${entry.dimensions ? ` · ${entry.dimensions} dims` : ""}`,
+			);
+			this.out(`         ${entry.databasePath}`);
+		}
+
+		this.out(
+			`\n${inventory.entries.length} index(es), ${DiskUsage.format(inventory.totalBytes)} total.`,
+		);
+
+		const legacy = inventory.entries.filter((e) => e.kind === "legacy").length;
+		const dead = inventory.entries.filter((e) => !e.rootExists).length;
+		if (legacy > 0) {
+			this.out(
+				`${legacy} still in the state directory — run \`lmgrep projects adopt\` in each project to move them in.`,
+			);
+		}
+		if (dead > 0) {
+			this.out(
+				`${dead} whose project no longer exists — \`lmgrep projects gc\` reclaims them.`,
+			);
+		}
+		if (inventory.dangling > 0) {
+			this.out(
+				`${inventory.dangling} stale pointer(s) to deleted indexes — \`lmgrep projects gc\` forgets them.`,
+			);
 		}
 	}
 

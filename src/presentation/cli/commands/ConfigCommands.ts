@@ -1,26 +1,28 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import type { Command } from "commander";
 import type { LmgrepConfig } from "../../../domain/config/LmgrepConfig.js";
 import { ModelIdentity } from "../../../domain/project/ModelIdentity.js";
-import { ProjectLocator } from "../../../domain/project/ProjectLocator.js";
 import { EmbeddingPrefixes } from "../../../infrastructure/ai/EmbeddingPrefixes.js";
 import { LocalRuntimeDetector } from "../../../infrastructure/ai/LocalRuntimeDetector.js";
 import type { DetectedRuntime } from "../../../infrastructure/ai/ModelRuntime.js";
 import { ConfigLoader } from "../../../infrastructure/fs/ConfigLoader.js";
-import { ProjectMetadataStore } from "../../../infrastructure/fs/ProjectMetadataStore.js";
-import { StateDirectory } from "../../../infrastructure/fs/StateDirectory.js";
-import { GitClient } from "../../../infrastructure/git/GitClient.js";
 import type { CommandContext } from "../CommandContext.js";
 import { ConfigTemplate } from "../ConfigTemplate.js";
 
 /**
  * `init` and `config` — getting a working configuration.
  *
- * `init` is deliberately opinionated: it detects Ollama, and when an index
- * already exists it will only propose a model from the same family, because
- * configuring an incompatible one silently breaks every future search.
+ * Both write exactly one file: the machine config. Which model to embed with
+ * describes this computer, not any repository, so there is one place it can
+ * live and one file to edit when it is wrong.
+ *
+ * `init` no longer has to reason about which model an existing index was built
+ * with. Indexes are stored per model, so choosing a different one selects a
+ * different database rather than corrupting the meaning of an existing one —
+ * an entire class of "you must pick a compatible model" logic that stopped
+ * being necessary the moment the storage layout changed.
  */
 export class ConfigCommands {
 	constructor(private readonly context: CommandContext) {}
@@ -33,60 +35,42 @@ export class ConfigCommands {
 	private registerInit(program: Command): void {
 		program
 			.command("init")
-			.description("Detect your embedding setup and create config")
-			.option("--force", "Overwrite existing config")
-			.option(
-				"--local",
-				"Write a project-local .lmgrep.yml instead of the global config",
-			)
-			.action((options: { force?: boolean; local?: boolean }) =>
-				this.runInit(options),
-			);
+			.description("Detect your local models and write the machine config")
+			.option("--force", "Overwrite the existing config")
+			.action((options: { force?: boolean }) => this.runInit(options));
 	}
 
-	private async runInit(options: {
-		force?: boolean;
-		local?: boolean;
-	}): Promise<void> {
+	private async runInit(options: { force?: boolean }): Promise<void> {
 		const { renderer } = this.context;
-		const cwd = this.context.cwd;
 		const loader = new ConfigLoader();
-		const configPath = options.local
-			? join(cwd, ".lmgrep.yml")
-			: loader.globalConfigPath();
+		const configPath = loader.globalConfigPath();
 
 		if (existsSync(configPath) && !options.force) {
 			renderer.error(
-				`Config already exists at ${configPath}. Use --force to overwrite.`,
+				`Config already exists at ${configPath}. Use --force to re-detect, or \`lmgrep config\` to edit.`,
 			);
 			process.exitCode = 1;
 			return;
 		}
 
-		// The config already at this path is an explicit prior choice; an index
-		// built from it is a harder constraint still.
+		// The config already at this path is an explicit prior choice.
 		const previous = loader.readFile(configPath);
-		const existing = this.existingIndexMetadata(cwd);
-		const indexFamily = existing?.model
-			? ModelIdentity.of(existing.model).family
-			: undefined;
 
 		const runtime = await new LocalRuntimeDetector().detectBest();
 		if (!runtime) {
-			this.reportNoRuntime(existing, indexFamily);
+			this.reportNoRuntime();
 			this.write(configPath, ConfigTemplate.render());
-			renderer.line(`\nWrote ${configPath} (edit model before indexing)`);
+			renderer.line(`\nWrote ${configPath} (set a model before indexing)`);
 			return;
 		}
 
 		renderer.line(`Found ${runtime.label}.`);
 		const model =
-			this.keepConfiguredModel(runtime, previous) ??
-			this.selectEmbeddingModel(runtime, existing, indexFamily);
-		const chatModel = model
-			? (this.keepConfiguredChatModel(runtime, previous) ??
-				this.selectChatModel(runtime))
-			: undefined;
+			this.keepConfigured(runtime, previous?.model, "embedding") ??
+			this.selectEmbeddingModel(runtime);
+		const chatModel =
+			this.keepConfigured(runtime, previous?.chatModel, "chat") ??
+			this.selectChatModel(runtime);
 
 		this.write(
 			configPath,
@@ -113,47 +97,27 @@ export class ConfigCommands {
 	 * Detection reads whatever the server lists first or happens to have
 	 * loaded, and both move — LM Studio reorders by recency and unloads when
 	 * idle. A model written in the config is a decision; re-deriving one from
-	 * volatile state would silently swap it, and re-indexing under a different
-	 * model is not a small mistake.
+	 * volatile state would silently swap it.
 	 */
-	private keepConfiguredModel(
+	private keepConfigured(
 		runtime: DetectedRuntime,
-		previous: Partial<LmgrepConfig> | undefined,
+		configured: string | undefined,
+		kind: "embedding" | "chat",
 	): string | undefined {
-		const configured = previous?.model;
 		if (!configured) return undefined;
 
 		const reference = ModelIdentity.of(configured);
 		if (reference.provider !== runtime.providerId) return undefined;
 
-		const available = runtime.models.some((m) => m.id === reference.family);
-		if (!available) {
+		if (!runtime.models.some((m) => m.id === reference.family)) {
 			this.context.renderer.line(
-				`Configured model "${reference.family}" is no longer available in ${runtime.label}.`,
+				`Configured ${kind} model "${reference.family}" is no longer available in ${runtime.label}.`,
 			);
 			return undefined;
 		}
 
 		this.context.renderer.line(
-			`Keeping configured embedding model: ${reference.family}`,
-		);
-		return reference.family;
-	}
-
-	/** Same reasoning as {@link keepConfiguredModel}, for `ask`. */
-	private keepConfiguredChatModel(
-		runtime: DetectedRuntime,
-		previous: Partial<LmgrepConfig> | undefined,
-	): string | undefined {
-		const configured = previous?.chatModel;
-		if (!configured) return undefined;
-		const reference = ModelIdentity.of(configured);
-		if (reference.provider !== runtime.providerId) return undefined;
-		if (!runtime.models.some((m) => m.id === reference.family)) {
-			return undefined;
-		}
-		this.context.renderer.line(
-			`Keeping configured chat model: ${reference.family}`,
+			`Keeping configured ${kind} model: ${reference.family}`,
 		);
 		return reference.family;
 	}
@@ -176,16 +140,7 @@ export class ConfigCommands {
 		return model ? EmbeddingPrefixes.forModel(model) : undefined;
 	}
 
-	/**
-	 * Choose an embedding model, respecting an existing index's family above
-	 * all else — a mismatch produces incomparable vectors, not merely worse
-	 * results, so it is better to configure nothing than the wrong thing.
-	 */
-	private selectEmbeddingModel(
-		runtime: DetectedRuntime,
-		existing: { model?: string; dimensions?: number } | undefined,
-		indexFamily: string | undefined,
-	): string | undefined {
+	private selectEmbeddingModel(runtime: DetectedRuntime): string | undefined {
 		const { renderer } = this.context;
 		const embedders = LocalRuntimeDetector.embeddingModels(runtime);
 		// Runtimes that do not type their models still list them; treat the
@@ -194,28 +149,6 @@ export class ConfigCommands {
 			...embedders,
 			...LocalRuntimeDetector.untypedModels(runtime),
 		];
-
-		if (indexFamily) {
-			renderer.line(
-				`Index built with "${existing?.model}" (${indexFamily}${existing?.dimensions ? `, ${existing.dimensions} dims` : ""})`,
-			);
-			const compatible = candidates.find(
-				(m) =>
-					ModelIdentity.of(`${runtime.providerId}:${m.id}`).family ===
-					indexFamily,
-			);
-			if (compatible) {
-				renderer.line(`Found compatible model: ${compatible.id}`);
-				return compatible.id;
-			}
-			renderer.line(
-				`\nNo compatible model available. You need one from the "${indexFamily}" family.`,
-			);
-			renderer.line(
-				`Install it in ${runtime.label}, then run \`lmgrep init\` again.`,
-			);
-			return undefined;
-		}
 
 		const picked = embedders[0] ?? candidates[0];
 		if (!picked) {
@@ -262,8 +195,8 @@ export class ConfigCommands {
 	 *
 	 * The pick is a guess whenever nothing is loaded, and switching means
 	 * editing one config line — but only if the user knows what else was
-	 * there. Silently choosing one of five is how you end up indexing a whole
-	 * repository with the wrong model.
+	 * there. Switching is now cheap and reversible, since each model keeps its
+	 * own index, but it still costs a re-embed the first time.
 	 */
 	private reportAlternatives(
 		candidates: readonly { id: string }[],
@@ -277,35 +210,16 @@ export class ConfigCommands {
 		this.context.renderer.line("  Change `model` in the config to switch.");
 	}
 
-	private existingIndexMetadata(cwd: string) {
-		const state = new StateDirectory();
-		const locator = new ProjectLocator(new GitClient(), state);
-		const databasePath = locator.databasePathFor(cwd);
-		return existsSync(databasePath)
-			? new ProjectMetadataStore(state).read(databasePath)
-			: undefined;
-	}
-
-	private reportNoRuntime(
-		existing: { model?: string; dimensions?: number } | undefined,
-		indexFamily: string | undefined,
-	): void {
+	private reportNoRuntime(): void {
 		const { renderer } = this.context;
 		renderer.line("No local embedding server detected.\n");
 		renderer.line("Start one of:");
 		renderer.line("  Ollama     curl -fsSL https://ollama.com/install.sh | sh");
 		renderer.line("  LM Studio  https://lmstudio.ai — enable the local server");
 		renderer.line("");
-		if (indexFamily && existing) {
-			renderer.line(
-				`This index was built with "${existing.model}" (${existing.dimensions} dims).`,
-			);
-			renderer.line("Load a compatible model, then run `lmgrep init` again.");
-		} else {
-			renderer.line(
-				"Then run `lmgrep init` again to auto-configure, or edit the config by hand.",
-			);
-		}
+		renderer.line(
+			"Then run `lmgrep init` again to auto-configure, or edit the config by hand.",
+		);
 	}
 
 	private write(configPath: string, contents: string): void {
@@ -316,7 +230,7 @@ export class ConfigCommands {
 	private registerConfig(program: Command): void {
 		program
 			.command("config")
-			.description("Open the global config file in your editor")
+			.description("Open the machine config in your editor")
 			.action(() => {
 				const { renderer } = this.context;
 				const configPath = new ConfigLoader().globalConfigPath();

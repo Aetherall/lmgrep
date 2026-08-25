@@ -13,8 +13,6 @@ export interface IndexBuildOptions {
 	reset?: boolean;
 	/** Only consider files modified within this duration (e.g. "10m", "2h"). */
 	since?: string;
-	/** Re-embed even when the file hash is unchanged. */
-	force?: boolean;
 	/** Report what would be indexed without doing it. */
 	dry?: boolean;
 	verbose?: boolean;
@@ -30,6 +28,10 @@ export interface IndexBuildOptions {
 }
 
 export interface IndexBuildResult {
+	/** Chunks embedded and stored. */
 	succeeded: number;
+	/** Chunks that failed to embed. */
 	failed: number;
+	/** Files dropped because they no longer exist in the working tree. */
+	removed: number;
 }

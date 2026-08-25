@@ -18,20 +18,20 @@ export class AskCommand {
 	constructor(private readonly context: CommandContext) {}
 
 	register(program: Command): void {
-		program
-			.command("ask <question>")
-			.description(
-				"Answer a question with a local agentic research loop (search + read + synthesize). Requires `chatModel` in config.",
-			)
-			.option(
-				"--json",
-				"Output the full result (answer, sources, trace) as JSON",
-			)
-			.option("--quiet", "Suppress the live research trace on stderr")
-			.option("--database <name-or-path>", CliOptions.DATABASE)
-			.action((question: string, options: AskOptions) =>
-				this.run(question, options),
-			);
+		CliOptions.target(
+			program
+				.command("ask <question...>")
+				.description(
+					"Answer a question with a local research loop (search, read, synthesize)",
+				)
+				.option(
+					"--json",
+					"Print the full result (answer, sources, trace) as JSON",
+				)
+				.option("--quiet", "Suppress the live research trace on stderr"),
+		).action((question: string[], options: AskOptions) =>
+			this.run(question.join(" "), options),
+		);
 	}
 
 	private async run(question: string, options: AskOptions): Promise<void> {

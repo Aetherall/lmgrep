@@ -1,20 +1,23 @@
 #compdef lmgrep
 
+# Regenerate by hand when commands change; `lmgrep completions zsh` prints this
+# file verbatim.
+
 _lmgrep() {
   local -a commands
   commands=(
-    'index:Index the current directory for semantic search'
     'search:Search the codebase using natural language'
-    'ask:Answer a question with a local research loop (search, read, synthesize)'
-    'status:Show index stats and check embedding connectivity'
-    'repair:Detect and fix index inconsistencies'
-    'serve:Watch the current directory and re-index on changes'
-    'init:Detect your embedding setup and create config'
-    'config:Open the global config file in your editor'
-    'compact:Compact the index to reclaim disk space'
-    'prune:Delete the index database for the current directory'
-    'import:Import chunks and file hashes from another lmgrep database'
+    'ask:Answer a question with a local research loop'
+    'index:Index this project for semantic search'
+    'status:Report whether search works, and why not'
+    'projects:List indexes on this machine, and reclaim their space'
+    'init:Detect your local models and write the machine config'
+    'config:Open the machine config in your editor'
+    'mcp:Start the MCP server (stdio transport)'
     'completions:Output shell completions'
+    'serve:Watch this project and re-index as files change'
+    'share:Offer this project index to a peer over P2P'
+    'import:Import chunks from a peer or another lmgrep database'
   )
 
   _arguments -C \
@@ -31,70 +34,60 @@ _lmgrep() {
       case "$words[1]" in
         index)
           _arguments \
-            '(-r --reset)'{-r,--reset}'[Reset and rebuild the entire index]' \
+            '(-r --reset)'{-r,--reset}'[Discard the index and rebuild from scratch]' \
             '(-v --verbose)'{-v,--verbose}'[Show file-by-file progress]' \
             '(-s --since)'{-s,--since}'[Only consider files modified within duration]:duration' \
-            '(-f --force)'{-f,--force}'[Force re-embed even if file hash unchanged]' \
-            '(-d --dry)'{-d,--dry}'[Show what would be indexed without actually doing it]' \
-            '--database[Target a specific database by name or path]:name or path:_files -/'
+            '(-d --dry)'{-d,--dry}'[Report what would be indexed, and stop]' \
+            '*--in[Project directory, or the name of a standalone index]:project or name:_files -/'
           ;;
         search)
           _arguments \
-            '1:query' \
-            '(-m --limit)'{-m,--limit}'[Max results]:number' \
-            '--scores[Show relevance scores]' \
-            '--compact[Show file paths only]' \
-            '--json[Output results as JSON]' \
-            '--min-score[Minimum score threshold]:score' \
-            '--file-prefix[Only search files matching this path prefix]:prefix:_files -/' \
-            '--not[Exclude results similar to this query]:query' \
-            '--type[Only return chunks of these AST types]:types' \
-            '--language[Only return chunks from files with these extensions]:extensions' \
-            '--project[Search a different project index]:path:_files -/' \
-            '--across[Search multiple project indexes]:paths' \
-            '--database[Target a specific database by name or path]:name or path:_files -/'
+            '(-m --limit)'{-m,--limit}'[Max results]:count' \
+            '--under[Only search files under this path]:path:_files -/' \
+            '--language[Only search these file extensions]:extensions' \
+            '--compact[Print matching file paths only]' \
+            '--json[Print results as JSON]' \
+            '*--in[Project directory, or the name of a standalone index]:project or name:_files -/'
           ;;
         ask)
           _arguments \
-            '1:question' \
-            '--json[Output the full result as JSON]' \
+            '--json[Print the full result as JSON]' \
             '--quiet[Suppress the live research trace on stderr]' \
-            '--database[Target a specific database by name or path]:name or path:_files -/'
+            '*--in[Project directory, or the name of a standalone index]:project or name:_files -/'
           ;;
         status)
           _arguments \
-            '(-c --changes)'{-c,--changes}'[Scan for changed files since last index]' \
-            '--json[Output status as JSON]' \
-            '--database[Target a specific database by name or path]:name or path:_files -/'
+            '(-v --verbose)'{-v,--verbose}'[Also show index statistics and probes]' \
+            '(-c --changes)'{-c,--changes}'[Scan for files changed since the last index]' \
+            '--json[Print status as JSON]' \
+            '*--in[Project directory, or the name of a standalone index]:project or name:_files -/'
           ;;
-        repair)
-          _arguments \
-            '(-d --dry)'{-d,--dry}'[Show what would be repaired without making changes]' \
-            '--json[Output repair results as JSON]' \
-            '--database[Target a specific database by name or path]:name or path:_files -/'
-          ;;
-        serve|compact)
-          _arguments \
-            '--database[Target a specific database by name or path]:name or path:_files -/'
+        projects)
+          local -a subcommands
+          subcommands=(
+            'list:Show every index, largest first'
+            'adopt:Move this project index from the state directory into the repository'
+            'rm:Delete an index'
+            'gc:Delete indexes whose project no longer exists'
+          )
+          _describe 'subcommand' subcommands
           ;;
         init)
-          _arguments \
-            '--force[Overwrite existing config]' \
-            '--local[Write a project-local .lmgrep.yml instead of the global config]'
+          _arguments '--force[Overwrite the existing config]'
           ;;
-        prune)
+        serve|mcp)
           _arguments \
-            '--force[Skip confirmation]'
+            '*--in[Project directory, or the name of a standalone index]:project or name:_files -/'
           ;;
         import)
           _arguments \
-            '1:database path:_files' \
-            '--reset[Reset the current index before importing]'
+            '--reset[Reset the current index before importing]' \
+            '1:share code or database path:_files -/'
           ;;
         completions)
-          _arguments \
-            '1:shell:(zsh)' \
-            '--install[Install to site-functions]'
+          local -a shells
+          shells=('zsh:Output zsh completions')
+          _describe 'shell' shells
           ;;
       esac
       ;;

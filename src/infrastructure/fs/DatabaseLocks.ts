@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { join } from "node:path";
 import type { LockPort } from "../../domain/ports/LockPort.js";
 import { PidFileLock } from "./PidFileLock.js";
 
@@ -17,6 +18,13 @@ import { PidFileLock } from "./PidFileLock.js";
  * silently prevented every sibling from ever watching, leaving their branches
  * to go stale with no indication. It also doubles as the liveness registry
  * `lmgrep status` reads, which is why the owning worktree is recorded in it.
+ *
+ * Both live in the state directory rather than beside the database. Locks
+ * coordinate processes on *this machine*; a database now lives inside a
+ * repository, which may be on a network filesystem, may be read-only, and is
+ * the wrong place to record which local pid is busy with it. Keeping them
+ * together in one directory is also what lets `status` find every running
+ * lmgrep by reading a single directory.
  */
 export class DatabaseLocks implements LockPort {
 	private static readonly DEFAULT_WAIT_MS = 120_000;
@@ -28,18 +36,31 @@ export class DatabaseLocks implements LockPort {
 	private readonly writer: PidFileLock;
 
 	constructor(
-		databasePath: string,
+		locksDirectory: string,
+		private readonly databasePath: string,
 		/** Working tree this process would be responsible for. */
 		private readonly workspaceRoot: string,
 	) {
+		const database = DatabaseLocks.digestOf(databasePath);
 		this.maintainer = new PidFileLock(
-			`${databasePath}@${DatabaseLocks.digestOf(workspaceRoot)}.lock`,
+			join(
+				locksDirectory,
+				`${database}@${DatabaseLocks.digestOf(workspaceRoot)}.lock`,
+			),
 		);
-		this.writer = new PidFileLock(`${databasePath}.writelock`);
+		this.writer = new PidFileLock(
+			join(locksDirectory, `${database}.writelock`),
+		);
 	}
 
 	acquireMaintainer(): boolean {
-		return this.maintainer.tryAcquire({ root: this.workspaceRoot });
+		// The database path goes in the payload because it is no longer in the
+		// filename: a digest cannot be reversed, and `status` needs to name the
+		// index a process is holding.
+		return this.maintainer.tryAcquire({
+			root: this.workspaceRoot,
+			database: this.databasePath,
+		});
 	}
 
 	releaseMaintainer(): void {
@@ -81,10 +102,10 @@ export class DatabaseLocks implements LockPort {
 		}
 	}
 
-	/** Short stable suffix distinguishing one worktree's lock from another's. */
-	private static digestOf(workspaceRoot: string): string {
+	/** Short stable name for a path, used to key lock files. */
+	private static digestOf(path: string): string {
 		return createHash("sha256")
-			.update(workspaceRoot)
+			.update(path)
 			.digest("hex")
 			.slice(0, DatabaseLocks.ROOT_DIGEST_LENGTH);
 	}

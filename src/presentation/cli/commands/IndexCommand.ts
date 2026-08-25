@@ -6,48 +6,57 @@ interface IndexOptions extends GlobalOptions {
 	reset?: boolean;
 	verbose?: boolean;
 	since?: string;
-	force?: boolean;
 	dry?: boolean;
 }
 
-/** `lmgrep index` — build or update the index for the working directory. */
+/**
+ * `lmgrep index` — adopt a project, and keep it current.
+ *
+ * This is the one moment a user consents to lmgrep reading a whole repository
+ * and spending time embedding it, which is why it stays an explicit command
+ * rather than something a search triggers. Everything that used to be a
+ * separate chore afterwards — reconciling the manifest, dropping duplicate
+ * rows, compacting fragments, training the vector index — happens here, at the
+ * one moment someone is already waiting and watching.
+ */
 export class IndexCommand {
 	constructor(private readonly context: CommandContext) {}
 
 	register(program: Command): void {
-		program
-			.command("index")
-			.description("Index the current directory for semantic search")
-			.option("-r, --reset", "Reset and rebuild the entire index")
-			.option("-v, --verbose", "Show file-by-file progress")
-			.option(
-				"-s, --since <duration>",
-				"Only consider files modified within duration (e.g. 10m, 2h, 1d)",
-			)
-			.option(
-				"-f, --force",
-				"Force re-embed even if file hash unchanged (use with --since)",
-			)
-			.option(
-				"-d, --dry",
-				"Show what would be indexed without actually doing it",
-			)
-			.option("--database <name-or-path>", CliOptions.DATABASE)
-			.action((options: IndexOptions) => this.run(options));
+		CliOptions.target(
+			program
+				.command("index")
+				.description("Index this project for semantic search")
+				.option("-r, --reset", "Discard the index and rebuild from scratch")
+				.option("-v, --verbose", "Show file-by-file progress")
+				.option(
+					"-s, --since <duration>",
+					"Only consider files modified within duration (e.g. 10m, 2h, 1d)",
+				)
+				.option("-d, --dry", "Report what would be indexed, and stop"),
+		).action((options: IndexOptions) => this.run(options));
 	}
 
 	private async run(options: IndexOptions): Promise<void> {
-		await this.context.withLmgrep(options, (lmgrep) =>
-			lmgrep.build({
+		await this.context.withLmgrep(options, async (lmgrep) => {
+			const result = await lmgrep.build({
 				reset: options.reset,
 				verbose: options.verbose,
 				since: options.since,
-				force: options.force,
 				dry: options.dry,
 				// A foreground command the user is watching, so it is the right
 				// place to pay the one-time ANN training cost.
 				createIndex: true,
-			}),
-		);
+			});
+
+			if (options.dry) return;
+			// Only after a run that changed something: deduplication reads
+			// every row, and paying that on `lmgrep index` over an unchanged
+			// repository would make the no-op case the slow one.
+			if (result.succeeded > 0 || result.removed > 0) {
+				this.context.renderer.maintenance(await lmgrep.tidy());
+			}
+			this.context.renderer.line(`\nIndex: ${lmgrep.location.path}`);
+		});
 	}
 }

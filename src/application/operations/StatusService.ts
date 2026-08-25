@@ -1,3 +1,4 @@
+import type { ConfigSource } from "../../domain/config/ConfigSource.js";
 import type { LmgrepConfig } from "../../domain/config/LmgrepConfig.js";
 import type { Vector } from "../../domain/corpus/Vector.js";
 import type { ChunkRepositoryPort } from "../../domain/ports/ChunkRepositoryPort.js";
@@ -11,20 +12,41 @@ import type { DatabaseLocation } from "../../domain/project/DatabaseLocation.js"
 import type { ProjectLocator } from "../../domain/project/ProjectLocator.js";
 import { Deadline } from "./Deadline.js";
 
+/**
+ * Whether search works right now, and if not, the one thing to do about it.
+ *
+ * A single verdict rather than a wall of statistics: the question someone runs
+ * `status` to answer is "is it working", and burying that under file counts
+ * and latency figures made every reader derive it themselves.
+ */
+export type StatusVerdict =
+	| { searchable: true; note?: string }
+	| { searchable: false; reason: string; fix: string };
+
 export interface StatusInfo {
+	verdict: StatusVerdict;
 	projectRoot: string;
 	prefix: string;
+	databasePath: string;
 	config: LmgrepConfig;
+	/** Which files supplied the configuration, in increasing precedence. */
+	configSources: readonly ConfigSource[];
 	fileCount: number;
 	chunkCount: number;
 	uniqueHashes: number;
 	embeddingOk: boolean;
 	embeddingLatencyMs?: number;
 	embeddingError?: string;
-	/** Did a generic smoke query return at least one result? */
+	/** Did a generic smoke query return at least one result on this branch? */
 	searchOk: boolean;
 	searchResultCount?: number;
 	searchLatencyMs?: number;
+	/**
+	 * Whether the database holds anything at all, ignoring branch scope. The
+	 * gap between this and {@link searchOk} is what distinguishes "this branch
+	 * has not been indexed" from "the index is broken".
+	 */
+	anyBranchOk?: boolean;
 	indexModel?: string;
 	indexDimensions?: number;
 	/** How searches are answered: by vector index, or by scanning every row. */
@@ -52,6 +74,7 @@ export class StatusService {
 		private readonly location: DatabaseLocation,
 		private readonly config: LmgrepConfig,
 		private readonly cwd: string,
+		private readonly configSources: readonly ConfigSource[],
 	) {}
 
 	async status(): Promise<StatusInfo> {
@@ -75,18 +98,74 @@ export class StatusService {
 				: this.locator.databasePathFor(projectRoot),
 		);
 
-		return {
+		const vectorIndex = await this.maintenance.vectorIndexState();
+		const info: Omit<StatusInfo, "verdict"> = {
 			projectRoot,
 			prefix: ancestor?.prefix ?? "",
+			databasePath: this.location.path,
 			config: this.config,
+			configSources: this.configSources,
 			fileCount: filesByPath.size,
 			chunkCount,
 			uniqueHashes: hashes.size,
 			...probe,
-			vectorIndex: await this.maintenance.vectorIndexState(),
+			vectorIndex,
 			indexModel: meta?.model,
 			indexDimensions: meta?.dimensions,
 		};
+		return { ...info, verdict: this.judge(info) };
+	}
+
+	/**
+	 * Reduce the probes to one answer, in the order a user would care.
+	 *
+	 * A missing vector index is a note rather than a failure: search works, it
+	 * is just answering by reading every embedding, which nothing else would
+	 * tell you.
+	 */
+	private judge(info: Omit<StatusInfo, "verdict">): StatusVerdict {
+		if (info.fileCount === 0) {
+			return {
+				searchable: false,
+				reason: "This project is not indexed.",
+				fix: "lmgrep index",
+			};
+		}
+		if (!info.embeddingOk) {
+			return {
+				searchable: false,
+				reason: `The embedding provider is unreachable — ${info.embeddingError ?? "no response"}`,
+				fix: `Start the server at ${this.config.baseURL ?? "your configured baseURL"}, then retry.`,
+			};
+		}
+		if (!info.searchOk) {
+			// Manifests are per branch while chunks are shared by content, so
+			// a checkout that has never been indexed searches an empty scope
+			// over a full database. That is an ordinary state on a new
+			// worktree or branch, and telling someone to `--reset` over it
+			// would throw away a working index for no reason.
+			return info.anyBranchOk
+				? {
+						searchable: false,
+						reason: "This branch has not been indexed yet.",
+						fix: "lmgrep index",
+					}
+				: {
+						searchable: false,
+						reason:
+							"The index holds files but answered a test query with nothing — it is likely stale or was built with a different model.",
+						fix: "lmgrep index --reset",
+					};
+		}
+		if (!info.vectorIndex.built && info.vectorIndex.worthBuilding) {
+			return {
+				searchable: true,
+				note:
+					`Every search reads all ${info.vectorIndex.rows} embeddings — slow, and roughly the ` +
+					"index's size in memory per query. `lmgrep index` builds the vector index.",
+			};
+		}
+		return { searchable: true };
 	}
 
 	/**
@@ -100,6 +179,7 @@ export class StatusService {
 		searchOk: boolean;
 		searchResultCount?: number;
 		searchLatencyMs?: number;
+		anyBranchOk?: boolean;
 	}> {
 		const deadline = Deadline.after(StatusService.PROBE_TIMEOUT_MS);
 
@@ -128,12 +208,24 @@ export class StatusService {
 			const hits = await deadline.enforce(
 				this.chunks.search({ vector, limit: 1, scopeToBranch: true }),
 			);
+			// Only when the scoped query found nothing: the unscoped one is a
+			// second query, and it is worth running solely to tell an
+			// unindexed branch apart from a broken index.
+			const anyBranchOk =
+				hits.length > 0
+					? true
+					: (
+							await deadline.enforce(
+								this.chunks.search({ vector, limit: 1, scopeToBranch: false }),
+							)
+						).length > 0;
 			return {
 				embeddingOk: true,
 				embeddingLatencyMs,
 				searchOk: hits.length > 0,
 				searchResultCount: hits.length,
 				searchLatencyMs: Date.now() - started,
+				anyBranchOk,
 			};
 		} catch {
 			// The embedder works; the index does not answer. That is a

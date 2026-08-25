@@ -16,7 +16,6 @@ export {
 	type LmgrepOptions,
 } from "./application/LmgrepFactory.js";
 export type { HealthState } from "./application/operations/HealthMonitor.js";
-export type { RepairResult } from "./application/operations/RepairService.js";
 export type { StatusInfo } from "./application/operations/StatusService.js";
 export type { ResearchResult } from "./application/research/ResearchAgent.js";
 export type { SearchOptions } from "./application/search/SearchCriteria.js";
@@ -32,10 +31,7 @@ export type { EmbedderPort } from "./domain/ports/EmbedderPort.js";
 export type { LoggerPort } from "./domain/ports/LoggerPort.js";
 export { Branch } from "./domain/project/Branch.js";
 export { DatabaseLocation } from "./domain/project/DatabaseLocation.js";
-export type {
-	DiscoveredIndex,
-	IndexMetadata,
-} from "./domain/project/IndexMetadata.js";
+export type { IndexMetadata } from "./domain/project/IndexMetadata.js";
 export { ModelIdentity } from "./domain/project/ModelIdentity.js";
 export { Project } from "./domain/project/Project.js";
 export { ProjectId } from "./domain/project/ProjectId.js";

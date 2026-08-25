@@ -12,6 +12,8 @@ export interface LockOwner {
 	pid: number;
 	/** Working tree the owner is responsible for, when it has one. */
 	root?: string;
+	/** Database the owner holds. Lock files no longer sit beside it. */
+	database?: string;
 }
 
 /**
@@ -81,7 +83,11 @@ export class PidFileLock {
 			try {
 				const parsed = JSON.parse(raw) as Partial<LockOwner>;
 				return typeof parsed.pid === "number"
-					? { pid: parsed.pid, root: parsed.root }
+					? {
+							pid: parsed.pid,
+							root: parsed.root,
+							database: parsed.database,
+						}
 					: undefined;
 			} catch {
 				return undefined;

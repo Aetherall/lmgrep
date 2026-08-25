@@ -7,11 +7,13 @@ import type { DatabaseSessionPort } from "../domain/ports/DatabaseSessionPort.js
 import type { EmbedderPort } from "../domain/ports/EmbedderPort.js";
 import type { FileManifestRepositoryPort } from "../domain/ports/FileManifestRepositoryPort.js";
 import type {
+	DedupeReport,
 	IndexMaintenancePort,
 	OptimizeReport,
 } from "../domain/ports/IndexMaintenancePort.js";
 import type { IndexMetadataPort } from "../domain/ports/IndexMetadataPort.js";
 import type { LoggerPort } from "../domain/ports/LoggerPort.js";
+import type { ProjectRegistryPort } from "../domain/ports/ProjectRegistryPort.js";
 import type { DatabaseLocation } from "../domain/project/DatabaseLocation.js";
 import type { ProjectId } from "../domain/project/ProjectId.js";
 import type { ProjectLocator } from "../domain/project/ProjectLocator.js";
@@ -23,10 +25,6 @@ import type {
 	IndexBuildOptions,
 	IndexBuildResult,
 } from "./indexing/IndexingProgress.js";
-import type {
-	RepairResult,
-	RepairService,
-} from "./operations/RepairService.js";
 import type { StatusInfo, StatusService } from "./operations/StatusService.js";
 import type { WatchService } from "./operations/WatchService.js";
 import type {
@@ -35,6 +33,12 @@ import type {
 } from "./research/ResearchAgent.js";
 import { SearchCriteria, type SearchOptions } from "./search/SearchCriteria.js";
 import type { SearchService } from "./search/SearchService.js";
+
+/** What a maintenance pass changed. */
+export interface TidyReport {
+	deduped: DedupeReport;
+	optimized: OptimizeReport;
+}
 
 /** Everything an Lmgrep instance owns, assembled by the composition root. */
 export interface LmgrepServices {
@@ -48,12 +52,12 @@ export interface LmgrepServices {
 	manifest: FileManifestRepositoryPort;
 	maintenance: IndexMaintenancePort;
 	metadata: IndexMetadataPort;
+	registry: ProjectRegistryPort;
 	embedder: EmbedderPort;
 	chunker: ChunkerPort;
 	builder: IndexBuilder;
 	sweeper: BranchManifestSweeper;
 	searcher: SearchService;
-	repairer: RepairService;
 	statusReporter: StatusService;
 	watcher: WatchService;
 	researcher: ResearchAgent;
@@ -99,10 +103,6 @@ export class Lmgrep {
 		return this.services.researcher.research(question, onTrace);
 	}
 
-	repair(dryRun = false): Promise<RepairResult> {
-		return this.services.repairer.repair(this.services.cwd, dryRun);
-	}
-
 	status(): Promise<StatusInfo> {
 		return this.services.statusReporter.status();
 	}
@@ -117,23 +117,32 @@ export class Lmgrep {
 		return this.services.manifest.current();
 	}
 
-	optimize(): Promise<OptimizeReport> {
-		return this.services.maintenance.compact();
-	}
-
 	/**
-	 * Drop manifests for branches git no longer has.
+	 * Everything the index needs done to it that is not indexing: drop dead
+	 * branches' manifests, remove duplicate and superseded rows, compact the
+	 * fragments, and train the vector index if the table has grown into
+	 * wanting one.
 	 *
-	 * Pruning depends on this: `dedupe` keeps any chunk version some manifest
-	 * still references, so a dead branch's leftover rows make its orphaned
-	 * chunks look live.
+	 * These were three separate commands. They are one call because they are
+	 * one intent and because the order between them is not optional: `dedupe`
+	 * keeps any chunk version some manifest still references, so sweeping dead
+	 * branches has to happen first or their leftover rows shield their own
+	 * orphaned chunks from collection.
 	 */
-	sweepStaleBranches(): Promise<void> {
-		return this.services.sweeper.sweep(this.services.location.root);
+	async tidy(): Promise<TidyReport> {
+		await this.services.sweeper.sweep(this.services.location.root);
+		const deduped = await this.services.maintenance.dedupe();
+		const optimized = await this.services.maintenance.compact();
+		return { deduped, optimized };
 	}
 
 	get maintenance(): IndexMaintenancePort {
 		return this.services.maintenance;
+	}
+
+	/** Every index this machine knows about. */
+	get registry(): ProjectRegistryPort {
+		return this.services.registry;
 	}
 
 	get projectId(): ProjectId {

@@ -5,6 +5,7 @@ import type { Branch } from "../../../domain/project/Branch.js";
 import type { IndexMetadata } from "../../../domain/project/IndexMetadata.js";
 import { ModelIdentity } from "../../../domain/project/ModelIdentity.js";
 import { ProjectLocator } from "../../../domain/project/ProjectLocator.js";
+import { ConfigLoader } from "../../../infrastructure/fs/ConfigLoader.js";
 import { ProjectMetadataStore } from "../../../infrastructure/fs/ProjectMetadataStore.js";
 import { StateDirectory } from "../../../infrastructure/fs/StateDirectory.js";
 import { GitClient } from "../../../infrastructure/git/GitClient.js";
@@ -41,8 +42,8 @@ export class ShareCommands {
 
 	private registerExport(program: Command): void {
 		program
-			.command("export")
-			.description("Share this project's index with a peer via P2P")
+			.command("share")
+			.description("Offer this project's index to a peer over P2P")
 			.action(() => this.runExport());
 	}
 
@@ -67,22 +68,21 @@ export class ShareCommands {
 
 	private registerImport(program: Command): void {
 		program
-			.command("import [source]")
+			.command("import <source>")
 			.description(
-				"Import chunks from a peer (share code) or another lmgrep database (path). " +
-					"If no argument is given, tries to find a legacy index for this directory.",
+				"Import chunks from a peer (share code) or another lmgrep database (path)",
 			)
 			.option("--reset", "Reset the current index before importing")
-			.action((source: string | undefined, options: { reset?: boolean }) =>
+			.action((source: string, options: { reset?: boolean }) =>
 				this.runImport(source, options),
 			);
 	}
 
 	private async runImport(
-		source: string | undefined,
+		source: string,
 		options: { reset?: boolean },
 	): Promise<void> {
-		if (source && ShareCode.looksLikeCode(source)) {
+		if (ShareCode.looksLikeCode(source)) {
 			await this.importFromPeer(source, options);
 			return;
 		}
@@ -125,16 +125,14 @@ export class ShareCommands {
 	}
 
 	private async importFromDatabase(
-		source: string | undefined,
+		source: string,
 		options: { reset?: boolean },
 	): Promise<void> {
 		const { renderer } = this.context;
 		const cwd = this.context.cwd;
-		const { locator, branch, location, store } = this.resolve();
+		const { branch, location, store } = this.resolve();
 
-		const sourcePath = source
-			? resolve(cwd, source)
-			: this.findLegacyIndex(locator, cwd);
+		const sourcePath = resolve(cwd, source);
 
 		if (!existsSync(sourcePath)) {
 			throw new Error(`Database not found: ${sourcePath}`);
@@ -168,27 +166,22 @@ export class ShareCommands {
 					`${sourceMeta.dimensions ? `, ${sourceMeta.dimensions} dims` : ""}).`,
 			);
 			renderer.line(
-				"Configure a compatible model in .lmgrep.yml, then run `lmgrep init` to auto-detect.",
+				"Set that model in your machine config (`lmgrep config`) to search these vectors.",
 			);
 		}
-	}
-
-	private findLegacyIndex(locator: ProjectLocator, cwd: string): string {
-		const legacy = locator.legacyDatabasePathFor(cwd);
-		if (!existsSync(legacy)) {
-			throw new Error(
-				"No legacy index found. Provide a path: lmgrep import <db-path>",
-			);
-		}
-		this.context.renderer.line(`Found legacy index at ${legacy}`);
-		return legacy;
 	}
 
 	/** The pieces every share operation needs, resolved from the cwd. */
 	private resolve(): ShareTarget {
 		const state = new StateDirectory();
-		const locator = new ProjectLocator(new GitClient(), state);
-		const store = new ProjectMetadataStore(state);
+		const config = new ConfigLoader().load(this.context.cwd);
+		const locator = new ProjectLocator(
+			new GitClient(),
+			state,
+			ModelIdentity.of(config.model),
+			config.dimensions,
+		);
+		const store = new ProjectMetadataStore();
 		const database = locator.resolveDatabase(this.context.cwd);
 		return {
 			locator,

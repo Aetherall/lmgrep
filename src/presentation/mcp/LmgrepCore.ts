@@ -6,7 +6,7 @@ import {
 } from "../../application/operations/HealthMonitor.js";
 import { AiSdkChatModel } from "../../infrastructure/ai/AiSdkChatModel.js";
 import { SilentLogger } from "../../infrastructure/fs/Loggers.js";
-import { ProjectMetadataStore } from "../../infrastructure/fs/ProjectMetadataStore.js";
+import { ProjectRegistry } from "../../infrastructure/fs/ProjectRegistry.js";
 import { StateDirectory } from "../../infrastructure/fs/StateDirectory.js";
 import { HitFormatter } from "./HitFormatter.js";
 import { IndexWatchController } from "./IndexWatchController.js";
@@ -46,7 +46,7 @@ export class LmgrepCore {
 		private readonly lmgrep: Lmgrep,
 		private readonly health: HealthMonitor,
 		private readonly watching: IndexWatchController,
-		private readonly metadata: ProjectMetadataStore,
+		private readonly registry: ProjectRegistry,
 		readonly askAvailable: boolean,
 	) {}
 
@@ -57,10 +57,12 @@ export class LmgrepCore {
 		const lmgrep = await new LmgrepFactory().open({
 			cwd: options.cwd,
 			database: options.database,
-			// stdout is the MCP transport; a stray log line corrupts it.
+			// stdout is the MCP transport; a stray log line corrupts it, and
+			// that includes configuration warnings.
 			logger: new SilentLogger(),
+			onWarning: () => {},
 		});
-		const metadata = new ProjectMetadataStore(new StateDirectory());
+		const registry = new ProjectRegistry(new StateDirectory());
 
 		const isIndexed = () => lmgrep.isIndexed();
 		const watching = new IndexWatchController(lmgrep, isIndexed);
@@ -85,7 +87,7 @@ export class LmgrepCore {
 			lmgrep,
 			health,
 			watching,
-			metadata,
+			registry,
 			// `ask` needs a chat model on top of the embedder; only expose the
 			// tool when one is configured, so agents never see a tool they
 			// cannot use.
@@ -205,11 +207,23 @@ export class LmgrepCore {
 		}
 	}
 
+	/**
+	 * Projects an agent can actually reach with the `project` parameter.
+	 *
+	 * Standalone indexes are excluded: they are addressed by name, and their
+	 * recorded root is merely where they were built from, so offering one as a
+	 * project path would resolve to a different database.
+	 */
 	private otherProjects(): OtherProject[] {
 		const current = this.lmgrep.location.path;
-		return this.metadata
-			.discoverAll()
-			.filter((p) => p.databasePath !== current)
-			.map((p) => ({ root: p.metadata.root, remote: p.metadata.remote }));
+		const seen = new Set<string>();
+		const out: OtherProject[] = [];
+		for (const entry of this.registry.list()) {
+			if (entry.name || entry.databasePath === current) continue;
+			if (seen.has(entry.root)) continue;
+			seen.add(entry.root);
+			out.push({ root: entry.root, remote: entry.remote });
+		}
+		return out;
 	}
 }

@@ -5,6 +5,12 @@
 export interface GitPort {
 	/** Absolute path of the working tree root, or undefined outside a repo. */
 	toplevel(cwd: string): string | undefined;
+	/**
+	 * Absolute path of the repository directory shared by every worktree —
+	 * the main checkout's `.git`, even when called from a linked worktree.
+	 * This is what lets worktrees agree on one index without a registry.
+	 */
+	commonDir(cwd: string): string | undefined;
 	/** Current branch name, or "HEAD" when detached. */
 	currentBranch(repoRoot: string): string | undefined;
 	/** URL of the `origin` remote, if one is configured. */
