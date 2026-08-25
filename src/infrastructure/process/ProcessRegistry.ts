@@ -29,6 +29,8 @@ export interface RunningProcess {
  */
 export class ProcessRegistry {
 	private static readonly LOCK_SUFFIX = ".lock";
+	/** Separates the database slug from the worktree digest in a lock name. */
+	private static readonly WORKTREE_SEPARATOR = "@";
 
 	constructor(
 		private readonly state: StateDirectoryPort,
@@ -51,41 +53,49 @@ export class ProcessRegistry {
 		for (const entry of entries) {
 			if (!entry.endsWith(ProcessRegistry.LOCK_SUFFIX)) continue;
 
-			const pid = this.readPid(join(base, entry));
-			if (pid === undefined) continue;
-			if (!PidFileLock.isAlive(pid) || seen.has(pid)) continue;
-			seen.add(pid);
+			const owner = new PidFileLock(join(base, entry)).read();
+			if (owner === undefined) continue;
+			if (!PidFileLock.isAlive(owner.pid) || seen.has(owner.pid)) continue;
+			seen.add(owner.pid);
 
-			const info = this.inspect(pid);
+			const info = this.inspect(owner.pid);
 			if (!info) continue;
 
-			const kind = this.classify(info);
-			const databasePath = join(
-				base,
-				entry.slice(0, -ProcessRegistry.LOCK_SUFFIX.length),
-			);
-
 			results.push({
-				pid,
+				pid: owner.pid,
 				processName: info.name,
 				cmdline: info.cmdline,
-				kind,
-				projectRoot: this.metadata.read(databasePath)?.root,
-				// MCP and serve processes watch; plain CLI invocations don't.
-				watching: kind === "mcp" || kind === "serve",
+				kind: this.classify(info),
+				// The lock records the worktree its owner actually watches,
+				// which is what the user wants to see — several worktrees can
+				// share one database, so the database's own recorded root
+				// would name the wrong tree. Older locks carry no root, so
+				// fall back to the database metadata for those.
+				projectRoot:
+					owner.root ??
+					this.metadata.read(this.databasePathFor(base, entry))?.root,
+				// Every lock in this scan is a maintainer lock, and only a
+				// watcher ever takes one — so holding it *is* watching. This
+				// used to be inferred from the command line, which cannot
+				// work: setting process.title overwrites that buffer, so the
+				// subcommand a process was launched with is no longer there
+				// to match against.
+				watching: true,
 			});
 		}
 
 		return results;
 	}
 
-	private readPid(lockPath: string): number | undefined {
-		try {
-			const pid = Number.parseInt(readFileSync(lockPath, "utf-8").trim(), 10);
-			return Number.isNaN(pid) ? undefined : pid;
-		} catch {
-			return undefined;
-		}
+	/**
+	 * The database a lock belongs to. Maintainer locks are named
+	 * `<database>@<worktree-digest>.lock`; anything before the separator is the
+	 * database directory.
+	 */
+	private databasePathFor(base: string, entry: string): string {
+		const name = entry.slice(0, -ProcessRegistry.LOCK_SUFFIX.length);
+		const separator = name.lastIndexOf(ProcessRegistry.WORKTREE_SEPARATOR);
+		return join(base, separator === -1 ? name : name.slice(0, separator));
 	}
 
 	private inspect(pid: number): { name: string; cmdline: string } | undefined {
@@ -102,11 +112,18 @@ export class ProcessRegistry {
 		}
 	}
 
+	/**
+	 * What kind of process this is, from its title.
+	 *
+	 * The title is the only reliable signal: `process.title` rewrites the argv
+	 * buffer, so /proc/<pid>/cmdline reads back as the title alone and carries
+	 * no subcommand. The MCP entry point titles itself distinctly; anything
+	 * else holding a maintainer lock reached it through `lmgrep serve`.
+	 */
 	private classify(info: { name: string; cmdline: string }): ProcessKind {
 		if (info.name === "lmgrep-mcp" || info.cmdline.includes("mcp")) {
 			return "mcp";
 		}
-		if (info.cmdline.includes("serve")) return "serve";
-		return "cli";
+		return "serve";
 	}
 }

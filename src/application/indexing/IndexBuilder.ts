@@ -2,7 +2,10 @@ import type { LmgrepConfig } from "../../domain/config/LmgrepConfig.js";
 import type { Chunk } from "../../domain/corpus/Chunk.js";
 import type { ContentHash } from "../../domain/corpus/ContentHash.js";
 import { FileVersion } from "../../domain/corpus/FileVersion.js";
-import type { SourceFile } from "../../domain/corpus/SourceFile.js";
+import type {
+	FileManifest,
+	SourceFile,
+} from "../../domain/corpus/SourceFile.js";
 import type { Vector } from "../../domain/faceting/Vector.js";
 import type { ChunkerPort } from "../../domain/ports/ChunkerPort.js";
 import type {
@@ -67,7 +70,17 @@ export class IndexBuilder {
 	 * write concurrently, or they race into duplicate chunk rows.
 	 */
 	async build(options: IndexBuildOptions = {}): Promise<IndexBuildResult> {
-		return this.deps.locks.withWriteLock(() => this.buildLocked(options));
+		return this.deps.locks.withWriteLock(async () => {
+			const result = await this.buildLocked(options);
+			// Outside buildLocked on purpose. Sweeping is about branches that
+			// vanished from git, which has nothing to do with whether this run
+			// found anything to embed — and buildLocked returns early in five
+			// places, all of them reachable on a repo that never changes.
+			if (!options.dry) {
+				await this.deps.sweeper.sweep(this.deps.location.root);
+			}
+			return result;
+		});
 	}
 
 	private async buildLocked(
@@ -82,7 +95,7 @@ export class IndexBuilder {
 			await this.deps.bootstrapper.bootstrap(this.deps.location.root);
 		}
 
-		const files = this.selectFiles(options);
+		const { files, complete } = this.selectFiles(options);
 		options.onProgress?.({
 			phase: "scan",
 			current: files.length,
@@ -96,9 +109,20 @@ export class IndexBuilder {
 			this.deps.location.root,
 			options.force,
 		);
+
+		// Deletions are handled before the early returns below: a run where
+		// nothing changed can still be a run where something was removed.
+		const removed = options.dry
+			? 0
+			: await this.pruneDeletedFiles(files, current, manifest, complete);
+
 		logger.info(`${changed.length} files changed out of ${files.length}`);
 		if (changed.length === 0) {
-			logger.info("No changes detected. Index is up to date.");
+			logger.info(
+				removed > 0
+					? "No changes to index."
+					: "No changes detected. Index is up to date.",
+			);
 			return { succeeded: 0, failed: 0 };
 		}
 
@@ -134,12 +158,22 @@ export class IndexBuilder {
 		return this.embedAndStore(toEmbed, changedPaths, current, options);
 	}
 
-	private selectFiles(options: IndexBuildOptions): string[] {
+	/**
+	 * The files this run will look at, and whether that is the whole tree.
+	 *
+	 * `complete` matters for deletion detection: only a full scan can prove a
+	 * path is gone. A targeted or `--since` run sees a subset, where "absent
+	 * from the scan" means nothing.
+	 */
+	private selectFiles(options: IndexBuildOptions): {
+		files: string[];
+		complete: boolean;
+	} {
 		const { logger, workspace, config, location } = this.deps;
 
 		if (options.files && options.files.length > 0) {
 			logger.info(`Processing ${options.files.length} targeted files`);
-			return options.files;
+			return { files: options.files, complete: false };
 		}
 
 		let files = workspace.listFiles(
@@ -155,10 +189,65 @@ export class IndexBuilder {
 			logger.info(
 				`Found ${files.length} files modified in the last ${options.since} (out of ${before})`,
 			);
-		} else {
-			logger.info(`Found ${files.length} files`);
+			return { files, complete: false };
 		}
-		return files;
+
+		logger.info(`Found ${files.length} files`);
+		return { files, complete: true };
+	}
+
+	/**
+	 * Drop files the index still lists but the working tree no longer has.
+	 *
+	 * Without this a deleted file answers searches forever: change detection
+	 * only walks what exists on disk, so a removal is invisible to it — not
+	 * even a targeted re-index of the deleted path notices, because that path
+	 * simply fails to hash and is skipped.
+	 *
+	 * Two independent signals, because a run may not have seen the whole tree:
+	 *  - any scanned path that the manifest knows but cannot be read now;
+	 *  - on a complete scan only, any manifest path the scan never saw.
+	 */
+	private async pruneDeletedFiles(
+		scanned: string[],
+		readable: Map<string, ContentHash>,
+		manifest: FileManifest,
+		completeScan: boolean,
+	): Promise<number> {
+		const gone = new Set<string>();
+
+		for (const path of scanned) {
+			if (!readable.has(path) && manifest.has(path)) gone.add(path);
+		}
+
+		// A complete scan that found nothing has not proven the repository is
+		// empty — far more likely the walk failed, or the tree is mid-checkout.
+		// Wiping the manifest on that evidence would force a full re-embed, so
+		// treat it the same way as a partial scan and prune nothing.
+		if (completeScan && scanned.length > 0) {
+			const seen = new Set(scanned);
+			for (const path of manifest.paths()) {
+				if (!seen.has(path)) gone.add(path);
+			}
+		} else if (completeScan && !manifest.isEmpty) {
+			this.deps.logger.info(
+				"Scan found no files; skipping deletion check. " +
+					"Run `lmgrep repair` if the working tree really is empty.",
+			);
+		}
+
+		if (gone.size === 0) return 0;
+
+		const paths = [...gone];
+		// Chunks first: the repository decides whether another branch still
+		// references the path and keeps them if so. Our manifest row goes
+		// either way.
+		await this.deps.chunks.deleteByFiles(paths);
+		await this.deps.manifest.deleteFiles(paths);
+		this.deps.logger.info(
+			`Removed ${paths.length} file(s) deleted from the working tree`,
+		);
+		return paths.length;
 	}
 
 	/**
@@ -346,7 +435,6 @@ export class IndexBuilder {
 		}
 
 		this.deps.recordMetadata(dimensions);
-		await this.deps.sweeper.sweep(this.deps.location.root);
 		await this.runMaintenance(succeeded, options);
 
 		return { succeeded, failed: failedIndices.size };

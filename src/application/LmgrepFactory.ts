@@ -72,7 +72,7 @@ export class LmgrepFactory {
 		const locator = new ProjectLocator(git, state);
 		const location = locator.resolveDatabase(cwd, options.database);
 		const metadata = new ProjectMetadataStore(state);
-		const locks = new DatabaseLocks(location.path);
+		const locks = new DatabaseLocks(location.path, location.root);
 
 		const tables = new LanceTables(location.path, location.branch);
 		const manifest = new FileManifestRepository(tables, location.branch);
@@ -87,6 +87,8 @@ export class LmgrepFactory {
 
 		const vocabulary = new VocabularyBuilder(vocab, embedder, logger);
 
+		const sweeper = new BranchManifestSweeper(manifest, git, logger);
+
 		const builder = new IndexBuilder({
 			workspace,
 			chunker,
@@ -96,7 +98,7 @@ export class LmgrepFactory {
 			maintenance,
 			vocabulary,
 			bootstrapper: new BranchBootstrapper(manifest, git, logger),
-			sweeper: new BranchManifestSweeper(manifest, git, logger),
+			sweeper,
 			logger,
 			config,
 			location,
@@ -152,6 +154,7 @@ export class LmgrepFactory {
 			embedder,
 			chunker,
 			builder,
+			sweeper,
 			searcher,
 			facets,
 			vocabulary,

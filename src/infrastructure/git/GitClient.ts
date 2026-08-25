@@ -1,4 +1,4 @@
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import type { GitPort } from "../../domain/ports/GitPort.js";
 
 /**
@@ -52,9 +52,18 @@ export class GitClient implements GitPort {
 			.filter(Boolean);
 	}
 
+	/**
+	 * Run git with an argv array rather than a command string.
+	 *
+	 * This must not go through a shell. Git's own format specifiers contain
+	 * parentheses (`--format=%(refname:short)`), and branch names may legally
+	 * contain `(`, `)`, `&`, `;`, `$` and quotes — all of which a shell would
+	 * interpret. Passing a string here silently broke branch listing entirely
+	 * and made any branch name with a metacharacter unusable.
+	 */
 	private run(cwd: string, ...args: string[]): string | undefined {
 		try {
-			return execSync(`git ${args.join(" ")}`, {
+			return execFileSync("git", args, {
 				cwd,
 				stdio: ["ignore", "pipe", "ignore"],
 				timeout: GitClient.TIMEOUT_MS,

@@ -50,6 +50,10 @@ export class MaintenanceCommands {
 			.action(async (options: GlobalOptions) => {
 				await this.context.withLmgrep(options, async (lmgrep) => {
 					const { renderer } = this.context;
+					// Sweep first: dedupe keeps every version a manifest still
+					// references, so a deleted branch's rows would shield its
+					// own orphaned chunks from being collected.
+					await lmgrep.sweepStaleBranches();
 					const deduped = await lmgrep.maintenance.dedupe();
 					renderer.line(
 						deduped.duplicateIds + deduped.staleVersions > 0

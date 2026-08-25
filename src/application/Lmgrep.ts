@@ -24,6 +24,7 @@ import type {
 	FacetOverview,
 	FacetView,
 } from "./faceting/FacetNavigator.js";
+import type { BranchManifestSweeper } from "./indexing/BranchManifestSweeper.js";
 import type { IndexBuilder } from "./indexing/IndexBuilder.js";
 import type {
 	IndexBuildOptions,
@@ -58,6 +59,7 @@ export interface LmgrepServices {
 	embedder: EmbedderPort;
 	chunker: ChunkerPort;
 	builder: IndexBuilder;
+	sweeper: BranchManifestSweeper;
 	searcher: SearchService;
 	facets: FacetNavigator;
 	vocabulary: VocabularyBuilder;
@@ -184,6 +186,17 @@ export class Lmgrep {
 
 	optimize(): Promise<OptimizeReport> {
 		return this.services.maintenance.compact();
+	}
+
+	/**
+	 * Drop manifests for branches git no longer has.
+	 *
+	 * Pruning depends on this: `dedupe` keeps any chunk version some manifest
+	 * still references, so a dead branch's leftover rows make its orphaned
+	 * chunks look live.
+	 */
+	sweepStaleBranches(): Promise<void> {
+		return this.services.sweeper.sweep(this.services.location.root);
 	}
 
 	get maintenance(): IndexMaintenancePort {
