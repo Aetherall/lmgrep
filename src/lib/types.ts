@@ -161,6 +161,12 @@ export interface BuildOptions {
 	verbose?: boolean;
 	/** Only process these specific files instead of scanning the full tree */
 	files?: string[];
+	/**
+	 * Allow this build to train a vector index if the table lacks one. Off by
+	 * default: training peaks at several GB, so only foreground, user-initiated
+	 * commands opt in — never the background watcher.
+	 */
+	createIndex?: boolean;
 	onProgress?: (event: ProgressEvent) => void;
 }
 

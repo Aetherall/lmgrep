@@ -20,11 +20,10 @@ export interface EmbedderEvents {
  */
 export class EmbeddingAbortError extends Error {
 	constructor(
-		public readonly vectors: (number[] | null)[],
+		public readonly succeeded: number,
 		public readonly failedIndices: Set<number>,
 		public readonly total: number,
 	) {
-		const succeeded = vectors.filter((v) => v !== null).length;
 		super(
 			`Embedding aborted after ${failedIndices.size} failures. ` +
 				`${succeeded}/${total} chunks embedded successfully. ` +
@@ -176,11 +175,27 @@ export class ResilientEmbedder {
 		onBatch?: (
 			items: Array<{ index: number; vector: number[] }>,
 		) => Promise<void>,
-	): Promise<{ vectors: (number[] | null)[]; failedIndices: Set<number> }> {
+	): Promise<{ failedIndices: Set<number> }> {
 		const batchSize = this.config.batchSize;
-		const vectors: (number[] | null)[] = new Array(texts.length).fill(null);
 		const failedIndices = new Set<number>();
 		const totalBatches = Math.ceil(texts.length / batchSize);
+
+		// One byte per chunk to remember which indices have embedded, rather
+		// than retaining the embeddings themselves: `onBatch` already persisted
+		// them and no caller reads them back. At 3584 dimensions a retained
+		// vector is ~28KB of JS numbers, so a large repo buffered gigabytes for
+		// nothing but a progress count.
+		//
+		// A flag array rather than a counter because the reload path below
+		// rewinds `i` and replays batches; flags keep the count idempotent
+		// under replay, exactly as the old array-of-vectors did.
+		const succeededFlags = new Uint8Array(texts.length);
+		let succeededCount = 0;
+		const markSucceeded = (index: number): void => {
+			if (succeededFlags[index]) return;
+			succeededFlags[index] = 1;
+			succeededCount++;
+		};
 
 		for (let i = 0; i < texts.length; i += batchSize) {
 			const batchNum = Math.floor(i / batchSize) + 1;
@@ -194,7 +209,7 @@ export class ResilientEmbedder {
 			try {
 				const batchVectors = await this.embedder.embed(batch);
 				for (let j = 0; j < batch.length; j++) {
-					vectors[i + j] = batchVectors[j];
+					markSucceeded(i + j);
 					persisted.push({ index: i + j, vector: batchVectors[j] });
 				}
 				this.consecutiveFailures = 0;
@@ -204,7 +219,7 @@ export class ResilientEmbedder {
 				for (let j = 0; j < batch.length; j++) {
 					try {
 						const [vec] = await this.embedder.embed([batch[j]]);
-						vectors[i + j] = vec;
+						markSucceeded(i + j);
 						persisted.push({ index: i + j, vector: vec });
 					} catch (err) {
 						failedIndices.add(i + j);
@@ -228,8 +243,11 @@ export class ResilientEmbedder {
 				await onBatch(persisted);
 			}
 
-			const succeeded = vectors.filter((v) => v !== null).length;
-			this.events?.onBatchDone?.(batchNum, succeeded, failedIndices.size);
+			this.events?.onBatchDone?.(
+				batchNum,
+				succeededCount,
+				failedIndices.size,
+			);
 
 			// Handle consecutive failures
 			if (
@@ -256,9 +274,10 @@ export class ResilientEmbedder {
 					failedIndices.add(k);
 				}
 
-				// Abort — carry partial results so the caller can persist them
+				// Abort. Successes are already persisted via onBatch; the
+				// error carries only the counts needed for the message.
 				throw new EmbeddingAbortError(
-					vectors,
+					succeededCount,
 					failedIndices,
 					texts.length,
 				);
@@ -272,7 +291,7 @@ export class ResilientEmbedder {
 			}
 		}
 
-		return { vectors, failedIndices };
+		return { failedIndices };
 	}
 
 	private async reloadModel(): Promise<boolean> {

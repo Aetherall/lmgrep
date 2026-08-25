@@ -75,6 +75,10 @@ program
 			since: opts.since,
 			force: opts.force,
 			dry: opts.dry,
+			// Foreground command the user is watching — safe to pay the
+			// one-time ANN training cost here so searches stop scanning
+			// every embedding.
+			createIndex: true,
 		});
 		await index.close();
 	});
@@ -912,7 +916,18 @@ program
 			} else {
 				console.log("No duplicate or stale chunks found.");
 			}
-			await store.compact();
+			const report = await store.compact();
+			for (const t of report.tables) {
+				if (t.action === "created") {
+					console.log(
+						`Built vector index on ${t.table} (${t.rows} rows).`,
+					);
+				} else if (t.action === "skipped-small") {
+					console.log(
+						`Skipped vector index on ${t.table}: only ${t.rows} rows.`,
+					);
+				}
+			}
 		});
 		console.log("Compaction complete.");
 		await store.close();

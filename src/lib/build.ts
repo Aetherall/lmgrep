@@ -398,6 +398,40 @@ async function buildLocked(
 	// Sweep stale branch manifests for branches that no longer exist in git
 	await sweepStaleBranches(cwd, store, logger);
 
+	// Fold the rows just written into the ANN index and compact the fragments
+	// they landed in. No-ops when the unindexed tail is still small, so the
+	// watcher's 30s reconcile does not churn on every keystroke.
+	//
+	// `create` is deliberately off: first-time training reads every vector and
+	// peaks at several GB, which must not happen behind a background watcher.
+	// `opts.createIndex` lets a foreground command opt in. Never fatal — an
+	// unoptimized index is slow and memory-hungry, not wrong.
+	if (succeeded > 0) {
+		try {
+			const report = await store.optimize({
+				create: opts.createIndex ?? false,
+			});
+			for (const t of report.tables) {
+				if (t.action === "created") {
+					log(`Built vector index on ${t.table} (${t.rows} rows)`);
+				} else if (t.action === "optimized") {
+					log(
+						`Optimized ${t.table}: absorbed ${t.unindexed} unindexed rows`,
+					);
+				} else if (t.action === "needs-index") {
+					log(
+						`${t.table} has ${t.rows} rows and no vector index — ` +
+							"searches scan every embedding. Run `lmgrep compact` to build one.",
+					);
+				}
+			}
+		} catch (err) {
+			logger.error(
+				`Index optimization skipped: ${err instanceof Error ? err.message : err}`,
+			);
+		}
+	}
+
 	return { succeeded, failed };
 }
 

@@ -1,4 +1,4 @@
-import { connect, type Table, type Connection } from "@lancedb/lancedb";
+import { connect, Index, type Table, type Connection } from "@lancedb/lancedb";
 import { execSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -19,6 +19,76 @@ const FILES_TABLE = "files";
 const VOCAB_TABLE = "vocab";
 const DELETE_BATCH_SIZE = 50;
 
+/**
+ * Columns `search()` reads off a result row. Selecting explicitly keeps the
+ * 3584-float `vector` column out of the result set — without it LanceDB ships
+ * every over-fetched row's full embedding back into JS for nothing.
+ *
+ * `_distance` is listed on purpose: LanceDB currently auto-projects it into any
+ * scoring query, but warns that it will stop doing so. Naming it here pins the
+ * behaviour we depend on instead of relying on the deprecated default.
+ */
+const SEARCH_COLUMNS = [
+	"id",
+	"filePath",
+	"startLine",
+	"endLine",
+	"type",
+	"name",
+	"content",
+	"context",
+	"fileHash",
+	"_distance",
+];
+
+/**
+ * Below this row count a brute-force scan is cheap enough that training an ANN
+ * index costs more than it saves, and IVF-PQ has too few vectors to cluster
+ * well.
+ */
+const MIN_ROWS_FOR_ANN = 5_000;
+
+/**
+ * Re-absorb new rows into the ANN index once the unindexed tail passes this
+ * share of the indexed body. Rows outside the index are searched by flat scan,
+ * so the tail is exactly what we are trying to bound.
+ */
+const UNINDEXED_REINDEX_RATIO = 0.2;
+
+/** ...but always tolerate a small tail, so a 3-chunk edit never retrains. */
+const UNINDEXED_REINDEX_FLOOR = 2_000;
+
+/**
+ * Vector searches run without an explicit distance type, which LanceDB
+ * resolves to L2. The ANN index has its own default, so it is pinned here:
+ * an index built on a different metric would silently reorder every result.
+ */
+const VECTOR_DISTANCE_TYPE = "l2" as const;
+
+/**
+ * IVF-PQ stores compressed vectors, so its raw distances are approximations of
+ * the real ones. `refineFactor` makes LanceDB pull the uncompressed vectors for
+ * the top `limit * factor` candidates and re-score them exactly.
+ *
+ * It is not optional here. Measured on a 43k-chunk / 3584-dim index, mean
+ * recall@20 against an exact scan:
+ *
+ *   off -> 53%   1 -> 75%   3 -> 86%   10 -> 91%   20 -> 94%   50 -> 94%
+ *
+ * and without it `_distance` is wrong by ~0.07, which matters because `score`
+ * is derived from it and users filter on `--min-score`. With refine on, the
+ * scores match the exact scan to the digit.
+ *
+ * 20 sits at the knee: ~94% recall at ~11ms/query versus ~115ms for an exact
+ * scan. Beyond it recall flattens (the probed partitions run out of candidates)
+ * while latency keeps climbing. The refined set is bounded by the query limit,
+ * not by table size, so this costs a fixed handful of MB.
+ *
+ * Harmless on tables with no vector index: a flat scan already computes exact
+ * distances and returns identical rows.
+ */
+const VECTOR_REFINE_FACTOR = 20;
+
 function buildInFilter(column: string, values: string[]): string {
 	const escaped = values.map((v) => `'${v.replace(/'/g, "''")}'`);
 	return `${column} IN (${escaped.join(", ")})`;
@@ -29,6 +99,31 @@ async function batchDelete(table: Table, column: string, values: string[]): Prom
 		const batch = values.slice(i, i + DELETE_BATCH_SIZE);
 		await table.delete(buildInFilter(column, batch));
 	}
+}
+
+export interface TableOptimizeReport {
+	table: string;
+	rows: number;
+	/**
+	 * `skipped-small` - below the ANN threshold, flat scan is fine.
+	 * `needs-index`   - big enough to want an index, but training was not
+	 *                   requested on this path. Searches stay on flat scan
+	 *                   until `lmgrep index` or `lmgrep compact` runs.
+	 * `created`       - trained a vector index for the first time.
+	 * `optimized`     - compacted and absorbed the unindexed tail.
+	 * `up-to-date`    - tail still within tolerance, nothing done.
+	 */
+	action:
+		| "skipped-small"
+		| "needs-index"
+		| "created"
+		| "optimized"
+		| "up-to-date";
+	unindexed?: number;
+}
+
+export interface OptimizeReport {
+	tables: TableOptimizeReport[];
 }
 
 interface DedupableRow {
@@ -768,7 +863,13 @@ export class Store {
 		const t = await this.openVocab();
 		if (!t) return [];
 		const fetch = excludeTerms ? limit + excludeTerms.size : limit;
-		const rows = await t.search(vector).limit(fetch).toArray();
+		const rows = await t
+			.query()
+			.nearestTo(vector)
+			.limit(fetch)
+			.refineFactor(VECTOR_REFINE_FACTOR)
+			.select(["term", "_distance"])
+			.toArray();
 		const out: Array<{ term: string; score: number }> = [];
 		for (const r of rows) {
 			const term = r.term as string;
@@ -825,6 +926,106 @@ export class Store {
 		} else {
 			this.chunksTable = await conn.createTable(CHUNKS_TABLE, records);
 		}
+	}
+
+	// --- Maintenance ---
+
+	/**
+	 * Compact fragments and keep the ANN indexes current for every vector table.
+	 *
+	 * Without a vector index LanceDB answers `search()` by brute force: it
+	 * decodes every stored embedding to score it. At 3584 dimensions that walks
+	 * the whole table through memory on each query, so peak RSS tracks index
+	 * size roughly 1:1. IVF-PQ turns that into a handful of probes.
+	 *
+	 * Compaction matters for the same reason: small appends leave hundreds of
+	 * fragments, each carrying its own decode buffers.
+	 *
+	 * Cheap and idempotent when there is nothing to do, so it is safe to call
+	 * after every build.
+	 */
+	async optimize(
+		opts: { force?: boolean; create?: boolean } = {},
+	): Promise<OptimizeReport> {
+		const report: OptimizeReport = { tables: [] };
+		const tables: Array<[string, Table | undefined]> = [
+			[CHUNKS_TABLE, await this.openChunks()],
+			[VOCAB_TABLE, await this.openVocab()],
+		];
+
+		for (const [name, table] of tables) {
+			if (!table) continue;
+			report.tables.push(
+				await this.optimizeTable(
+					name,
+					table,
+					opts.force ?? false,
+					opts.create ?? false,
+				),
+			);
+		}
+		return report;
+	}
+
+	private async optimizeTable(
+		name: string,
+		table: Table,
+		force: boolean,
+		create: boolean,
+	): Promise<TableOptimizeReport> {
+		const rows = await table.countRows();
+
+		// Find an existing vector index, if any. `listIndices` reports the
+		// columns each index covers, so this stays correct if a scalar index is
+		// ever added alongside it.
+		const indices = await table.listIndices();
+		const vectorIndex = indices.find((i) => i.columns.includes("vector"));
+
+		if (!vectorIndex) {
+			// The size guard is not overridable. `force` means "don't wait for
+			// the tail to grow", not "cluster a table that has too few vectors
+			// to cluster" — IVF-PQ on a small table trains empty partitions and
+			// degrades recall for no memory saving.
+			if (rows < MIN_ROWS_FOR_ANN) {
+				return { table: name, rows, action: "skipped-small" };
+			}
+			// Training reads every vector and peaks at several times their size
+			// (~2.5GB for a 43k-row 3584-dim table). That is fine in a command
+			// the user ran and is watching; it is not fine on the watcher's
+			// 30s reconcile, which would spike the MCP server's RSS. So the
+			// incremental path reports the need and leaves training to
+			// `lmgrep index` / `lmgrep compact`.
+			if (!create) {
+				return { table: name, rows, action: "needs-index" };
+			}
+			// numPartitions and numSubVectors are left to LanceDB, which derives
+			// them from row count and dimensionality (dim/16, falling back to
+			// dim/8 then 1 when not divisible). Hard-coding them here would only
+			// reproduce that rule for the dimensions we happen to have seen.
+			await table.createIndex("vector", {
+				config: Index.ivfPq({ distanceType: VECTOR_DISTANCE_TYPE }),
+				replace: true,
+			});
+			await table.optimize();
+			return { table: name, rows, action: "created" };
+		}
+
+		const stats = await table.indexStats(vectorIndex.name);
+		const unindexed = stats?.numUnindexedRows ?? 0;
+		const indexed = stats?.numIndexedRows ?? 0;
+		const tolerated = Math.max(
+			UNINDEXED_REINDEX_FLOOR,
+			Math.floor(indexed * UNINDEXED_REINDEX_RATIO),
+		);
+
+		if (!force && unindexed <= tolerated) {
+			return { table: name, rows, action: "up-to-date", unindexed };
+		}
+
+		// optimize() both compacts fragments and folds the unindexed tail into
+		// the existing index — no retraining from scratch.
+		await table.optimize();
+		return { table: name, rows, action: "optimized", unindexed };
 	}
 
 	/**
@@ -916,7 +1117,12 @@ export class Store {
 		// Over-fetch: branch/version filtering and dedup both discard rows, so
 		// pull extra to still return `limit` distinct results.
 		const fetchLimit = branchVersions ? limit * 3 : limit * 2;
-		let query = t.search(queryVector).limit(fetchLimit);
+		let query = t
+			.query()
+			.nearestTo(queryVector)
+			.limit(fetchLimit)
+			.refineFactor(VECTOR_REFINE_FACTOR)
+			.select(SEARCH_COLUMNS);
 
 		const conditions: string[] = [];
 		if (filePrefix) {
@@ -980,7 +1186,14 @@ export class Store {
 			? await this.getBranchFileVersions()
 			: undefined;
 		const fetchLimit = branchVersions ? limit * 3 : limit * 2;
-		let query = t.search(queryVector).limit(fetchLimit);
+		// Unlike search(), the caller clusters on the embeddings, so `vector`
+		// stays in the projection.
+		let query = t
+			.query()
+			.nearestTo(queryVector)
+			.limit(fetchLimit)
+			.refineFactor(VECTOR_REFINE_FACTOR)
+			.select([...SEARCH_COLUMNS, "vector"]);
 		if (filePrefix) {
 			query = query.where(
 				`filePath LIKE '${filePrefix.replace(/'/g, "''")}%'`,
@@ -1341,13 +1554,23 @@ export class Store {
 		this.vocabTable = undefined;
 	}
 
-	async compact(): Promise<void> {
-		const t = await this.openChunks();
-		if (t) await t.optimize();
+	/**
+	 * Full maintenance pass: what `lmgrep compact` runs. Same work as
+	 * `optimize()` but unconditional, and it also compacts the files table
+	 * (which holds no embeddings, so it never needs a vector index).
+	 */
+	async compact(): Promise<OptimizeReport> {
+		const report = await this.optimize({ force: true, create: true });
 		const f = await this.openFiles();
-		if (f) await f.optimize();
-		const v = await this.openVocab();
-		if (v) await v.optimize();
+		if (f) {
+			await f.optimize();
+			report.tables.push({
+				table: FILES_TABLE,
+				rows: await f.countRows(),
+				action: "optimized",
+			});
+		}
+		return report;
 	}
 
 	/**
