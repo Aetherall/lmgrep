@@ -127,7 +127,10 @@ export class EvidenceLedger {
 
 	private firstLine(text: string): string {
 		const line =
-			text.split("\n").find((l) => l.trim().length > 0)?.trim() ?? "";
+			text
+				.split("\n")
+				.find((l) => l.trim().length > 0)
+				?.trim() ?? "";
 		return line.length > 100 ? `${line.slice(0, 100)}…` : line;
 	}
 }

@@ -308,6 +308,30 @@ pnpm dev          # watch mode
 pnpm check        # format and lint (Biome)
 ```
 
+### Architecture
+
+The source is layered, with dependencies pointing inward only:
+
+```
+src/
+  domain/          entities, value objects, and the port interfaces
+  application/     use cases that orchestrate the domain
+  infrastructure/  adapters: LanceDB, filesystem, git, AI SDK, tree-sitter, p2p
+  presentation/    the CLI and the MCP server
+```
+
+`domain/` knows nothing outside itself. `application/` depends on domain ports,
+never on a concrete adapter. `LmgrepFactory` is the single place that wires the
+graph together, so no entry point needs to know the assembly order.
+
+### Conventions
+
+- **No free functions.** Behaviour lives on the type that owns it. Constant
+  tables and pure helpers land as static-only classes, which is why Biome's
+  `noStaticOnlyClass` rule is disabled — the shape is intended here.
+- **Comments explain why, not what.** A measured constant records what the
+  measurement was; a non-obvious ordering records what breaks if it changes.
+
 ## License
 
 GPL-3.0

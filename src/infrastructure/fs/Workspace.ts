@@ -1,4 +1,4 @@
-import { statSync, watch } from "node:fs";
+import { readFileSync, statSync, watch } from "node:fs";
 import { join } from "node:path";
 import { globSync } from "glob";
 import { ContentHash } from "../../domain/corpus/ContentHash.js";
@@ -10,7 +10,6 @@ import type {
 	WorkspacePort,
 } from "../../domain/ports/WorkspacePort.js";
 import { IndexableFileRules } from "./IndexableFileRules.js";
-import { readFileSync } from "node:fs";
 
 /** The working tree on the real filesystem. */
 export class Workspace implements WorkspacePort {

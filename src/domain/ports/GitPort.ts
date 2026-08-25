@@ -12,7 +12,11 @@ export interface GitPort {
 	/** Merge base of `HEAD` and `ref`, if both are reachable. */
 	mergeBase(repoRoot: string, ref: string): string | undefined;
 	/** Number of commits `to` is ahead of `from`. */
-	commitDistance(repoRoot: string, from: string, to: string): number | undefined;
+	commitDistance(
+		repoRoot: string,
+		from: string,
+		to: string,
+	): number | undefined;
 	/** Local branch names. */
 	localBranches(repoRoot: string): string[];
 }

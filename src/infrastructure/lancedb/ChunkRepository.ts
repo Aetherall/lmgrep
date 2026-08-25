@@ -48,7 +48,9 @@ export class ChunkRepository implements ChunkRepositoryPort {
 
 	async add(chunks: EmbeddedChunk[]): Promise<void> {
 		if (chunks.length === 0) return;
-		const records = chunks.map(({ chunk, vector }) => this.toRow(chunk, vector));
+		const records = chunks.map(({ chunk, vector }) =>
+			this.toRow(chunk, vector),
+		);
 		const { table, seeded } = await this.tables.tableOrCreate(
 			TableName.Chunks,
 			records,
@@ -128,7 +130,10 @@ export class ChunkRepository implements ChunkRepositoryPort {
 		const kept = hits.deduplicated().takeAtMost(query.limit);
 
 		const vectorById = new Map<string, number[]>(
-			rows.map((r) => [r.id as string, Array.from(r.vector as Iterable<number>)]),
+			rows.map((r) => [
+				r.id as string,
+				Array.from(r.vector as Iterable<number>),
+			]),
 		);
 		return kept.toArray().map((hit) => ({
 			hit,

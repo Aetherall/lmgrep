@@ -1,6 +1,7 @@
 import type { LmgrepConfig } from "../../domain/config/LmgrepConfig.js";
 import type { LoggerPort } from "../../domain/ports/LoggerPort.js";
 import type { WorkspacePort } from "../../domain/ports/WorkspacePort.js";
+import type { DatabaseLocks } from "../../infrastructure/fs/DatabaseLocks.js";
 import type { IndexBuilder } from "../indexing/IndexBuilder.js";
 
 /**
@@ -31,16 +32,35 @@ export class WatchService {
 	private timer: ReturnType<typeof setInterval> | undefined;
 	private watcher: { close(): void } | undefined;
 
+	private holdsLock = false;
+
 	constructor(
 		private readonly builder: IndexBuilder,
 		private readonly workspace: WorkspacePort,
 		private readonly config: LmgrepConfig,
 		private readonly cwd: string,
 		private readonly logger: LoggerPort,
+		private readonly locks: DatabaseLocks,
 	) {}
 
-	/** Begin watching. Returns a function that stops it. */
+	/**
+	 * Begin watching. Returns a function that stops it.
+	 *
+	 * Acquiring the maintainer lock is what makes exactly one process
+	 * responsible for a database; it also registers this process so
+	 * `lmgrep status` can report who is watching. Losing the race is normal —
+	 * another server already has it — and simply means not watching.
+	 */
 	start(): () => void {
+		if (!this.locks.acquireMaintainer()) {
+			this.logger.info("Another process is already watching this index.");
+			return () => {};
+		}
+		this.holdsLock = true;
+		return this.beginWatching();
+	}
+
+	private beginWatching(): () => void {
 		// Catch up first, so a branch checked out while this was not running
 		// gets its manifest bootstrapped before any event arrives.
 		void this.reindex();
@@ -69,6 +89,10 @@ export class WatchService {
 		this.timer = undefined;
 		this.watcher?.close();
 		this.watcher = undefined;
+		if (this.holdsLock) {
+			this.locks.releaseMaintainer();
+			this.holdsLock = false;
+		}
 	}
 
 	/**

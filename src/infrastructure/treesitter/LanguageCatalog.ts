@@ -183,11 +183,7 @@ export const LANGUAGES: LanguageConfig[] = [
 			"enum_specifier",
 		],
 		importTypes: ["preproc_include", "using_declaration"],
-		scopeTypes: [
-			"class_specifier",
-			"struct_specifier",
-			"namespace_definition",
-		],
+		scopeTypes: ["class_specifier", "struct_specifier", "namespace_definition"],
 	},
 	{
 		id: "swift",
@@ -249,11 +245,7 @@ export const LANGUAGES: LanguageConfig[] = [
 			"trait_definition",
 		],
 		importTypes: ["import_declaration"],
-		scopeTypes: [
-			"class_definition",
-			"object_definition",
-			"trait_definition",
-		],
+		scopeTypes: ["class_definition", "object_definition", "trait_definition"],
 	},
 	{
 		id: "zig",
@@ -389,7 +381,6 @@ export const LANGUAGES: LanguageConfig[] = [
 	},
 ];
 
-
 /**
  * The grammar table and the lookups over it.
  *
@@ -401,7 +392,9 @@ export const LANGUAGES: LanguageConfig[] = [
 export class LanguageCatalog {
 	private readonly byExtension = new Map<string, LanguageConfig>();
 
-	constructor(private readonly languages: readonly LanguageConfig[] = LANGUAGES) {
+	constructor(
+		private readonly languages: readonly LanguageConfig[] = LANGUAGES,
+	) {
 		for (const lang of this.languages) {
 			for (const ext of lang.extensions) this.byExtension.set(ext, lang);
 		}

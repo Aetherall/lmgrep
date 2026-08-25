@@ -109,7 +109,7 @@ export class FacetNavigator {
 
 	/** Read back the clusters already computed at a path. */
 	async list(input: string): Promise<FacetView> {
-		const { session, path, node } = this.locate(input);
+		const { session, node } = this.locate(input);
 		if (!node.children) {
 			throw new Error(
 				`No facets computed at ${input}. Run \`lmgrep facet refine ${input}\`.`,

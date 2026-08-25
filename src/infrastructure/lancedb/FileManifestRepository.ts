@@ -1,5 +1,8 @@
 import { ContentHash } from "../../domain/corpus/ContentHash.js";
-import { FileManifest, type SourceFile } from "../../domain/corpus/SourceFile.js";
+import {
+	FileManifest,
+	type SourceFile,
+} from "../../domain/corpus/SourceFile.js";
 import type {
 	FileManifestRepositoryPort,
 	ManifestEntry,
@@ -79,11 +82,7 @@ export class FileManifestRepository implements FileManifestRepositoryPort {
 		// Replace this branch's rows for these paths, leaving other branches'
 		// rows for the same paths untouched.
 		const paths = records.map((r) => r.filePath);
-		for (
-			let i = 0;
-			i < paths.length;
-			i += LanceTables.FILTER_BATCH_SIZE
-		) {
+		for (let i = 0; i < paths.length; i += LanceTables.FILTER_BATCH_SIZE) {
 			const batch = paths.slice(i, i + LanceTables.FILTER_BATCH_SIZE);
 			await table.delete(
 				`branch = '${this.branch.toSqlLiteral()}' AND ${LanceTables.inFilter("filePath", batch)}`,
@@ -96,11 +95,7 @@ export class FileManifestRepository implements FileManifestRepositoryPort {
 	async deleteFiles(filePaths: string[]): Promise<void> {
 		const table = await this.tables.table(TableName.Files);
 		if (!table || filePaths.length === 0) return;
-		for (
-			let i = 0;
-			i < filePaths.length;
-			i += LanceTables.FILTER_BATCH_SIZE
-		) {
+		for (let i = 0; i < filePaths.length; i += LanceTables.FILTER_BATCH_SIZE) {
 			const batch = filePaths.slice(i, i + LanceTables.FILTER_BATCH_SIZE);
 			await table.delete(
 				`branch = '${this.branch.toSqlLiteral()}' AND ${LanceTables.inFilter("filePath", batch)}`,

@@ -1,4 +1,4 @@
-import { ContentHash } from "../corpus/ContentHash.js";
+import type { ContentHash } from "../corpus/ContentHash.js";
 import type { SourceFile } from "../corpus/SourceFile.js";
 
 /** Extension include/exclude overrides layered on the built-in set. */

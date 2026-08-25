@@ -97,9 +97,7 @@ export class EmbeddingPipeline {
 					markSucceeded,
 				);
 				this.consecutiveFailures =
-					batchFailures === batch.length
-						? this.consecutiveFailures + 1
-						: 0;
+					batchFailures === batch.length ? this.consecutiveFailures + 1 : 0;
 			}
 
 			// Persist before any abort below, so partial progress is durable
@@ -113,8 +111,7 @@ export class EmbeddingPipeline {
 			);
 
 			if (
-				this.consecutiveFailures >=
-				EmbeddingPipeline.MAX_CONSECUTIVE_FAILURES
+				this.consecutiveFailures >= EmbeddingPipeline.MAX_CONSECUTIVE_FAILURES
 			) {
 				const rewound = await this.tryReload(i, batchSize);
 				if (rewound !== undefined) {

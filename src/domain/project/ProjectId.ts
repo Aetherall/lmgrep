@@ -51,6 +51,9 @@ export class ProjectId {
 			s = s.replace(/^[a-z]+:\/\/[^/]+\//, "");
 		}
 		const parts = s.split("/").filter(Boolean);
-		return parts.slice(-2).join("-").replace(/[^a-zA-Z0-9_-]/g, "_");
+		return parts
+			.slice(-2)
+			.join("-")
+			.replace(/[^a-zA-Z0-9_-]/g, "_");
 	}
 }

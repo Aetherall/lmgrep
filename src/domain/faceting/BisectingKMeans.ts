@@ -131,7 +131,10 @@ export class BisectingKMeans {
 		return centroids;
 	}
 
-	private nearestCentroid(vector: Vector, centroids: readonly Vector[]): number {
+	private nearestCentroid(
+		vector: Vector,
+		centroids: readonly Vector[],
+	): number {
 		let best = 0;
 		let bestD = Infinity;
 		for (let c = 0; c < centroids.length; c++) {

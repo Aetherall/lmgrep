@@ -7,8 +7,9 @@ import { AiSdkChatModel } from "../infrastructure/ai/AiSdkChatModel.js";
 import { AiSdkEmbedder } from "../infrastructure/ai/AiSdkEmbedder.js";
 import { LocalModelReloader } from "../infrastructure/ai/LocalModelReloader.js";
 import { ConfigLoader } from "../infrastructure/fs/ConfigLoader.js";
-import { ConsoleLogger } from "../infrastructure/fs/Loggers.js";
+import { DatabaseLocks } from "../infrastructure/fs/DatabaseLocks.js";
 import { FacetSessionStore } from "../infrastructure/fs/FacetSessionStore.js";
+import { ConsoleLogger } from "../infrastructure/fs/Loggers.js";
 import { ProjectMetadataStore } from "../infrastructure/fs/ProjectMetadataStore.js";
 import { StateDirectory } from "../infrastructure/fs/StateDirectory.js";
 import { Workspace } from "../infrastructure/fs/Workspace.js";
@@ -32,8 +33,8 @@ import { WatchService } from "./operations/WatchService.js";
 import { ResearchAgent } from "./research/ResearchAgent.js";
 import { SearchService } from "./search/SearchService.js";
 import {
-	SearchTargetResolver,
 	type ForeignIndexOpener,
+	SearchTargetResolver,
 } from "./search/SearchTargetResolver.js";
 
 export interface LmgrepOptions {
@@ -71,12 +72,13 @@ export class LmgrepFactory {
 		const locator = new ProjectLocator(git, state);
 		const location = locator.resolveDatabase(cwd, options.database);
 		const metadata = new ProjectMetadataStore(state);
+		const locks = new DatabaseLocks(location.path);
 
 		const tables = new LanceTables(location.path, location.branch);
 		const manifest = new FileManifestRepository(tables, location.branch);
 		const chunks = new ChunkRepository(tables, manifest, location.branch);
 		const vocab = new VocabRepository(tables);
-		const maintenance = new IndexMaintenance(tables, manifest, chunks);
+		const maintenance = new IndexMaintenance(tables, manifest);
 
 		const embedder = options.embedder ?? new AiSdkEmbedder(config);
 		const chunker = options.chunker ?? new TreeSitterChunker();
@@ -98,6 +100,7 @@ export class LmgrepFactory {
 			logger,
 			config,
 			location,
+			locks,
 			recordMetadata: (dimensions) => {
 				const project = locator.resolveProject(cwd);
 				metadata.write(location.path, {
@@ -114,7 +117,6 @@ export class LmgrepFactory {
 
 		const searcher = new SearchService(
 			embedder,
-			chunks,
 			new SearchTargetResolver(
 				cwd,
 				chunks,
@@ -144,6 +146,7 @@ export class LmgrepFactory {
 			logger,
 			tables,
 			chunks,
+			manifest,
 			maintenance,
 			metadata,
 			embedder,
@@ -162,7 +165,7 @@ export class LmgrepFactory {
 				config,
 				cwd,
 			),
-			watcher: new WatchService(builder, workspace, config, cwd, logger),
+			watcher: new WatchService(builder, workspace, config, cwd, logger, locks),
 			researcher: new ResearchAgent(
 				searcher,
 				new AiSdkChatModel(config),
@@ -192,10 +195,7 @@ export class LmgrepFactory {
 					locator.databasePathFor(projectPath),
 					project.branch,
 				);
-				const manifest = new FileManifestRepository(
-					tables,
-					project.branch,
-				);
+				const manifest = new FileManifestRepository(tables, project.branch);
 				return {
 					chunks: new ChunkRepository(tables, manifest, project.branch),
 					close: async () => tables.close(),

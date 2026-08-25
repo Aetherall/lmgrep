@@ -1,7 +1,10 @@
+import { existsSync } from "node:fs";
 import type { LmgrepConfig } from "../domain/config/LmgrepConfig.js";
-import type { ChunkRepositoryPort } from "../domain/ports/ChunkRepositoryPort.js";
+import type { FileManifest } from "../domain/corpus/SourceFile.js";
 import type { ChunkerPort } from "../domain/ports/ChunkerPort.js";
+import type { ChunkRepositoryPort } from "../domain/ports/ChunkRepositoryPort.js";
 import type { EmbedderPort } from "../domain/ports/EmbedderPort.js";
+import type { FileManifestRepositoryPort } from "../domain/ports/FileManifestRepositoryPort.js";
 import type {
 	IndexMaintenancePort,
 	OptimizeReport,
@@ -10,10 +13,10 @@ import type { LoggerPort } from "../domain/ports/LoggerPort.js";
 import type { DatabaseLocation } from "../domain/project/DatabaseLocation.js";
 import type { ProjectId } from "../domain/project/ProjectId.js";
 import type { ProjectLocator } from "../domain/project/ProjectLocator.js";
-import type { HitList } from "../domain/retrieval/HitList.js";
 import type { TraceEntry } from "../domain/research/ResearchTrace.js";
-import type { LanceTables } from "../infrastructure/lancedb/LanceTables.js";
+import type { HitList } from "../domain/retrieval/HitList.js";
 import type { ProjectMetadataStore } from "../infrastructure/fs/ProjectMetadataStore.js";
+import type { LanceTables } from "../infrastructure/lancedb/LanceTables.js";
 import type {
 	FacetContents,
 	FacetNavigator,
@@ -27,10 +30,16 @@ import type {
 	IndexBuildResult,
 } from "./indexing/IndexingProgress.js";
 import type { VocabularyBuilder } from "./indexing/VocabularyBuilder.js";
-import type { RepairResult, RepairService } from "./operations/RepairService.js";
+import type {
+	RepairResult,
+	RepairService,
+} from "./operations/RepairService.js";
 import type { StatusInfo, StatusService } from "./operations/StatusService.js";
 import type { WatchService } from "./operations/WatchService.js";
-import type { ResearchAgent, ResearchResult } from "./research/ResearchAgent.js";
+import type {
+	ResearchAgent,
+	ResearchResult,
+} from "./research/ResearchAgent.js";
 import { SearchCriteria, type SearchOptions } from "./search/SearchCriteria.js";
 import type { SearchService } from "./search/SearchService.js";
 
@@ -43,6 +52,7 @@ export interface LmgrepServices {
 	logger: LoggerPort;
 	tables: LanceTables;
 	chunks: ChunkRepositoryPort;
+	manifest: FileManifestRepositoryPort;
 	maintenance: IndexMaintenancePort;
 	metadata: ProjectMetadataStore;
 	embedder: EmbedderPort;
@@ -167,6 +177,11 @@ export class Lmgrep {
 		return this.services.watcher.start();
 	}
 
+	/** The current branch's file manifest, for change previews. */
+	currentManifest(): Promise<FileManifest> {
+		return this.services.manifest.current();
+	}
+
 	optimize(): Promise<OptimizeReport> {
 		return this.services.maintenance.compact();
 	}
@@ -177,6 +192,24 @@ export class Lmgrep {
 
 	get projectId(): ProjectId {
 		return this.services.projectId();
+	}
+
+	/**
+	 * Whether this working directory has a usable index.
+	 *
+	 * An indexed ancestor counts: running from a subdirectory of an indexed
+	 * tree is ordinary, and reporting it as unindexed would disable search for
+	 * no reason. A manually targeted database is flat, so only its own path
+	 * matters.
+	 */
+	isIndexed(): boolean {
+		if (this.services.location.manual) {
+			return existsSync(this.services.location.path);
+		}
+		if (this.services.locator.findIndexedAncestor(this.services.cwd)) {
+			return true;
+		}
+		return existsSync(this.services.location.path);
 	}
 
 	async close(): Promise<void> {

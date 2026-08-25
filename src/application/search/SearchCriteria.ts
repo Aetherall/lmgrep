@@ -33,9 +33,7 @@ export class SearchCriteria {
 		const languages = options.language;
 		this.extensions =
 			languages && languages.length > 0
-				? new Set(
-						languages.map((l) => (l.startsWith(".") ? l : `.${l}`)),
-					)
+				? new Set(languages.map((l) => (l.startsWith(".") ? l : `.${l}`)))
 				: undefined;
 	}
 
@@ -67,10 +65,7 @@ export class SearchCriteria {
 		if (this.extensions && !this.extensions.has(hit.location.extension)) {
 			return false;
 		}
-		if (
-			this.options.minScore != null &&
-			hit.score < this.options.minScore
-		) {
+		if (this.options.minScore != null && hit.score < this.options.minScore) {
 			return false;
 		}
 		return true;

@@ -1,5 +1,5 @@
-import { ClusterAxes } from "../../domain/faceting/ClusterAxes.js";
 import { BisectingKMeans } from "../../domain/faceting/BisectingKMeans.js";
+import { ClusterAxes } from "../../domain/faceting/ClusterAxes.js";
 import { LabelVocabulary } from "../../domain/faceting/LabelVocabulary.js";
 import { Lexicon } from "../../domain/faceting/Lexicon.js";
 import type { VectorHit } from "../../domain/ports/ChunkRepositoryPort.js";
@@ -69,11 +69,7 @@ export class FacetEngine {
 		);
 
 		const primary = await this.assignLabels(axes, vocabulary);
-		const boundaries = await this.describeBoundaries(
-			axes,
-			vocabulary,
-			primary,
-		);
+		const boundaries = await this.describeBoundaries(axes, vocabulary, primary);
 
 		const groups = clustering.groups();
 		const clusters: FacetCluster[] = groups.map((members, index) => ({
@@ -114,10 +110,7 @@ export class FacetEngine {
 			// The label leads its own candidate list; the rest fill in behind it.
 			const candidates =
 				label === LabelVocabulary.FALLBACK_LABEL
-					? vocabulary.distinctTerms(
-							words,
-							FacetEngine.CANDIDATES_PER_CLUSTER,
-						)
+					? vocabulary.distinctTerms(words, FacetEngine.CANDIDATES_PER_CLUSTER)
 					: [
 							label,
 							...vocabulary.distinctTerms(
@@ -175,11 +168,10 @@ export class FacetEngine {
 
 				rows.push({
 					vs: primary[other].label,
-					terms: vocabulary.distinctTerms(
-						words,
-						FacetEngine.TERMS_PER_PAIR,
-						[primary[cluster].stem, primary[other].stem],
-					),
+					terms: vocabulary.distinctTerms(words, FacetEngine.TERMS_PER_PAIR, [
+						primary[cluster].stem,
+						primary[other].stem,
+					]),
 				});
 
 				// One qualifier per boundary, until the compact view is full.

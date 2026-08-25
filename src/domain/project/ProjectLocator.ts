@@ -50,11 +50,7 @@ export class ProjectLocator {
 			);
 		}
 
-		return new Project(
-			ProjectId.of(absolute),
-			absolute,
-			Branch.default(),
-		);
+		return new Project(ProjectId.of(absolute), absolute, Branch.default());
 	}
 
 	/** Database directory for the project containing `cwd`. */
@@ -95,16 +91,8 @@ export class ProjectLocator {
 		if (database && database.length > 0) {
 			const path = this.isPathLike(database)
 				? resolve(cwd, database)
-				: join(
-						this.state.root(),
-						database.replace(/[^a-zA-Z0-9_.-]/g, "_"),
-					);
-			return new DatabaseLocation(
-				path,
-				Branch.default(),
-				resolve(cwd),
-				true,
-			);
+				: join(this.state.root(), database.replace(/[^a-zA-Z0-9_.-]/g, "_"));
+			return new DatabaseLocation(path, Branch.default(), resolve(cwd), true);
 		}
 
 		const project = this.resolveProject(cwd);

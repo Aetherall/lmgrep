@@ -121,9 +121,7 @@ export class ChunkContextBuilder {
 				const name = this.nodeName(current);
 				if (name) {
 					scopes.unshift({
-						kind:
-							ChunkContextBuilder.SCOPE_KINDS[current.type] ??
-							current.type,
+						kind: ChunkContextBuilder.SCOPE_KINDS[current.type] ?? current.type,
 						name,
 					});
 				}
@@ -193,8 +191,7 @@ export class ChunkContextBuilder {
 		return (
 			node.childForFieldName("name") ??
 			node.children.find(
-				(c: Node) =>
-					c.type === "identifier" || c.type === "type_identifier",
+				(c: Node) => c.type === "identifier" || c.type === "type_identifier",
 			)
 		)?.text;
 	}

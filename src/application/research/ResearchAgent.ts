@@ -1,7 +1,10 @@
 import { generateText, stepCountIs, tool } from "ai";
 import { z } from "zod";
 import type { LmgrepConfig } from "../../domain/config/LmgrepConfig.js";
-import { CitationMarkers, type Source } from "../../domain/research/Citation.js";
+import {
+	CitationMarkers,
+	type Source,
+} from "../../domain/research/Citation.js";
 import { EvidenceLedger } from "../../domain/research/EvidenceLedger.js";
 import {
 	ResearchTrace,
@@ -10,7 +13,10 @@ import {
 import type { HitList } from "../../domain/retrieval/HitList.js";
 import type { AiSdkChatModel } from "../../infrastructure/ai/AiSdkChatModel.js";
 import { ProviderFailure } from "../../infrastructure/ai/ProviderFailure.js";
-import { SearchCriteria, type SearchOptions } from "../search/SearchCriteria.js";
+import {
+	SearchCriteria,
+	type SearchOptions,
+} from "../search/SearchCriteria.js";
 import { ResearchPrompts } from "./ResearchPrompts.js";
 
 export interface ResearchResult {
@@ -105,9 +111,7 @@ export class ResearchAgent {
 				type: z
 					.array(z.string())
 					.optional()
-					.describe(
-						"Filter by AST node type (e.g. ['function_declaration']).",
-					),
+					.describe("Filter by AST node type (e.g. ['function_declaration'])."),
 				language: z
 					.array(z.string())
 					.optional()

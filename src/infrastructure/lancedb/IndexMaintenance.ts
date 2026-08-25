@@ -1,4 +1,5 @@
 import { Index, type Table } from "@lancedb/lancedb";
+import type { FileManifestRepositoryPort } from "../../domain/ports/FileManifestRepositoryPort.js";
 import type {
 	DedupeReport,
 	IndexMaintenancePort,
@@ -6,9 +7,8 @@ import type {
 	OptimizeReport,
 	TableOptimizeReport,
 } from "../../domain/ports/IndexMaintenancePort.js";
-import type { FileManifestRepositoryPort } from "../../domain/ports/FileManifestRepositoryPort.js";
 import { ChunkRepository } from "./ChunkRepository.js";
-import { LanceTables, TableName } from "./LanceTables.js";
+import { type LanceTables, TableName } from "./LanceTables.js";
 import { VectorIndexPolicy } from "./VectorIndexPolicy.js";
 
 /**
@@ -32,7 +32,6 @@ export class IndexMaintenance implements IndexMaintenancePort {
 	constructor(
 		private readonly tables: LanceTables,
 		private readonly manifest: FileManifestRepositoryPort,
-		private readonly chunks: ChunkRepository,
 	) {}
 
 	/**
@@ -197,11 +196,7 @@ export class IndexMaintenance implements IndexMaintenancePort {
 	}
 
 	async reset(): Promise<void> {
-		for (const name of [
-			TableName.Chunks,
-			TableName.Files,
-			TableName.Vocab,
-		]) {
+		for (const name of [TableName.Chunks, TableName.Files, TableName.Vocab]) {
 			await this.tables.dropTable(name);
 		}
 		this.manifest.invalidate();

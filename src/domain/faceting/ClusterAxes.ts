@@ -53,9 +53,7 @@ export class ClusterAxes {
 		const siblingMean = this.total
 			.minus(this.sums[cluster])
 			.scaledBy(1 / siblingCount);
-		return this.centroids[cluster]
-			.minus(siblingMean.normalized())
-			.normalized();
+		return this.centroids[cluster].minus(siblingMean.normalized()).normalized();
 	}
 
 	/** `centroid(a) - centroid(b)`: what separates these two specifically. */

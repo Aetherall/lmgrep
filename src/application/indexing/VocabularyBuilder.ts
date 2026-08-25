@@ -37,10 +37,9 @@ export class VocabularyBuilder {
 		const batchSize =
 			options.embedBatchSize ?? VocabularyBuilder.DEFAULT_EMBED_BATCH;
 
-		const frequencies = this.lexicon.collectVocabulary(
-			this.textsOf(chunks),
-			{ minDf },
-		);
+		const frequencies = this.lexicon.collectVocabulary(this.textsOf(chunks), {
+			minDf,
+		});
 		if (frequencies.size === 0) return { added: 0 };
 
 		const known = await this.vocab.storedTerms();

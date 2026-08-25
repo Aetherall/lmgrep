@@ -1,8 +1,8 @@
 import {
 	createProviderRegistry,
+	type EmbeddingModel,
 	embed,
 	embedMany,
-	type EmbeddingModel,
 } from "ai";
 import type { LmgrepConfig } from "../../domain/config/LmgrepConfig.js";
 import { Vector } from "../../domain/faceting/Vector.js";

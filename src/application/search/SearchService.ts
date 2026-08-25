@@ -1,13 +1,15 @@
 import type { LmgrepConfig } from "../../domain/config/LmgrepConfig.js";
-import { Vector } from "../../domain/faceting/Vector.js";
-import type { ChunkRepositoryPort } from "../../domain/ports/ChunkRepositoryPort.js";
+import type { Vector } from "../../domain/faceting/Vector.js";
 import type { EmbedderPort } from "../../domain/ports/EmbedderPort.js";
 import type { LoggerPort } from "../../domain/ports/LoggerPort.js";
 import { ModelIdentity } from "../../domain/project/ModelIdentity.js";
 import { HitList } from "../../domain/retrieval/HitList.js";
 import type { ProjectMetadata } from "../../infrastructure/fs/ProjectMetadataStore.js";
 import type { SearchCriteria } from "./SearchCriteria.js";
-import type { SearchTarget, SearchTargetResolver } from "./SearchTargetResolver.js";
+import type {
+	SearchTarget,
+	SearchTargetResolver,
+} from "./SearchTargetResolver.js";
 
 /**
  * Runs a semantic search: embed the query, retrieve from every target index,
@@ -23,7 +25,6 @@ export class SearchService {
 
 	constructor(
 		private readonly embedder: EmbedderPort,
-		private readonly localChunks: ChunkRepositoryPort,
 		private readonly targets: SearchTargetResolver,
 		private readonly config: LmgrepConfig,
 		private readonly logger: LoggerPort,
@@ -62,7 +63,9 @@ export class SearchService {
 
 			merged = merged.concat(
 				target.projectRoot
-					? page.mapped((hit) => hit.relocatedUnder(target.projectRoot as string))
+					? page.mapped((hit) =>
+							hit.relocatedUnder(target.projectRoot as string),
+						)
 					: page,
 			);
 		}
@@ -97,10 +100,7 @@ export class SearchService {
 		const meta = this.readMetadata();
 		if (!meta) return;
 
-		if (
-			meta.dimensions != null &&
-			queryVector.dimensions !== meta.dimensions
-		) {
+		if (meta.dimensions != null && queryVector.dimensions !== meta.dimensions) {
 			throw new Error(
 				`Dimension mismatch: index has ${meta.dimensions}-dim vectors but ` +
 					`your model produces ${queryVector.dimensions}-dim. ` +

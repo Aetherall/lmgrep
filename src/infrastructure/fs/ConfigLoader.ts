@@ -18,7 +18,10 @@ export class ConfigLoader {
 	private static readonly SCHEMA = z.object({
 		model: z
 			.string()
-			.regex(/^.+:.+$/, 'Model must be in "provider:model" format (e.g. "ollama:nomic-embed-text")'),
+			.regex(
+				/^.+:.+$/,
+				'Model must be in "provider:model" format (e.g. "ollama:nomic-embed-text")',
+			),
 		provider: z.string().optional(),
 		baseURL: z.string().url().optional(),
 		local: z.boolean().optional(),
@@ -29,7 +32,10 @@ export class ConfigLoader {
 		maxTokens: z.number().int().positive().optional(),
 		chatModel: z
 			.string()
-			.regex(/^.+:.+$/, 'chatModel must be in "provider:model" format (e.g. "lmstudio:qwen/qwen3.5-9b")')
+			.regex(
+				/^.+:.+$/,
+				'chatModel must be in "provider:model" format (e.g. "lmstudio:qwen/qwen3.5-9b")',
+			)
 			.optional(),
 		chatProvider: z.string().optional(),
 		chatBaseURL: z.string().url().optional(),
@@ -93,9 +99,7 @@ export class ConfigLoader {
 		return join(this.configDirectory(), ConfigLoader.FILE_NAME);
 	}
 
-	private firstExisting(
-		paths: string[],
-	): Partial<LmgrepConfig> | undefined {
+	private firstExisting(paths: string[]): Partial<LmgrepConfig> | undefined {
 		for (const path of paths) {
 			const found = this.tryLoadFile(path);
 			if (found) return found;

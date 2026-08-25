@@ -34,10 +34,7 @@ export interface ForeignIndexOpener {
  * where the offset becomes a path prefix filter.
  */
 export class SearchTargetResolver {
-	private readonly opened = new Map<
-		ChunkRepositoryPort,
-		() => Promise<void>
-	>();
+	private readonly opened = new Map<ChunkRepositoryPort, () => Promise<void>>();
 
 	constructor(
 		private readonly cwd: string,
@@ -108,9 +105,7 @@ export class SearchTargetResolver {
 	 * genuinely different database — an indexed parent directory — which must
 	 * be opened rather than substituted with the local one.
 	 */
-	private async resolveLocal(
-		criteria: SearchCriteria,
-	): Promise<SearchTarget> {
+	private async resolveLocal(criteria: SearchCriteria): Promise<SearchTarget> {
 		const unscoped: SearchTarget = {
 			chunks: this.local,
 			filePrefix: criteria.filePrefix,

@@ -8,7 +8,8 @@
  */
 export class ModelIdentity {
 	/** Quantization and tag suffixes that do not change the embedding space. */
-	private static readonly VARIANT_SUFFIX = /^(Q\d|q\d|fp\d|f\d|latest|gguf|ggml)/i;
+	private static readonly VARIANT_SUFFIX =
+		/^(Q\d|q\d|fp\d|f\d|latest|gguf|ggml)/i;
 
 	private constructor(private readonly value: string) {}
 

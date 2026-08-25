@@ -4,7 +4,9 @@
  * parallel arrays (hits, metadata) without the clusterer knowing about them.
  */
 export class Clustering {
-	private constructor(private readonly members: readonly (readonly number[])[]) {}
+	private constructor(
+		private readonly members: readonly (readonly number[])[],
+	) {}
 
 	static fromGroups(groups: readonly (readonly number[])[]): Clustering {
 		return new Clustering(groups.filter((g) => g.length > 0));

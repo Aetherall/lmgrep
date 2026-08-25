@@ -12,8 +12,8 @@ import {
 	FacetSession,
 	type FacetSessionState,
 } from "../../domain/faceting/FacetSession.js";
-import type { ProjectId } from "../../domain/project/ProjectId.js";
 import type { StateDirectoryPort } from "../../domain/ports/StateDirectoryPort.js";
+import type { ProjectId } from "../../domain/project/ProjectId.js";
 
 /**
  * Facet sessions on disk, one JSON file per session, scoped per project.
@@ -54,11 +54,7 @@ export class FacetSessionStore {
 		);
 	}
 
-	create(
-		project: ProjectId,
-		query: string,
-		rootHits: string[],
-	): FacetSession {
+	create(project: ProjectId, query: string, rootHits: string[]): FacetSession {
 		const session = FacetSession.create(
 			this.allocateId(this.listIds(project)),
 			query,
@@ -79,11 +75,7 @@ export class FacetSessionStore {
 	}
 
 	private sessionsDirectory(project: ProjectId): string {
-		return join(
-			this.state.root(),
-			project.toSlug(),
-			FacetSessionStore.SUBDIR,
-		);
+		return join(this.state.root(), project.toSlug(), FacetSessionStore.SUBDIR);
 	}
 
 	private sessionPath(project: ProjectId, id: string): string {
@@ -98,10 +90,7 @@ export class FacetSessionStore {
 				for (let i = 0; i < length; i++) {
 					id +=
 						FacetSessionStore.ID_ALPHABET[
-							Math.floor(
-								Math.random() *
-									FacetSessionStore.ID_ALPHABET.length,
-							)
+							Math.floor(Math.random() * FacetSessionStore.ID_ALPHABET.length)
 						];
 				}
 				if (!existing.has(id)) return id;
@@ -133,8 +122,7 @@ export class FacetSessionStore {
 		);
 		if (remaining.length >= FacetSessionStore.MAX_SESSIONS) {
 			remaining.sort((a, b) => a.mtimeMs - b.mtimeMs);
-			const overflow =
-				remaining.length - FacetSessionStore.MAX_SESSIONS + 1;
+			const overflow = remaining.length - FacetSessionStore.MAX_SESSIONS + 1;
 			for (let i = 0; i < overflow; i++) {
 				this.remove(join(dir, remaining[i].name));
 			}

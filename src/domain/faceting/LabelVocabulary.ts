@@ -1,4 +1,4 @@
-import { Lexicon } from "./Lexicon.js";
+import type { Lexicon } from "./Lexicon.js";
 
 /**
  * Tracks which words a facet run has already spent.

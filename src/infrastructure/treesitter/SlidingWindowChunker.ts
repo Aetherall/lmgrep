@@ -23,11 +23,7 @@ export class SlidingWindowChunker implements ChunkerPort {
 		if (lines.length === 0) return [];
 
 		const chunks: Chunk[] = [];
-		for (
-			let i = 0;
-			i < lines.length;
-			i += SlidingWindowChunker.STRIDE_LINES
-		) {
+		for (let i = 0; i < lines.length; i += SlidingWindowChunker.STRIDE_LINES) {
 			const content = lines
 				.slice(i, i + SlidingWindowChunker.WINDOW_LINES)
 				.join("\n");

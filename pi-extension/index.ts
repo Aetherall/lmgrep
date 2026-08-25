@@ -1,6 +1,7 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
-import { createLmgrepCore, type HealthState } from "../src/lib/search-tool.ts";
+import type { HealthState } from "../src/application/operations/HealthMonitor.ts";
+import { LmgrepCore } from "../src/presentation/mcp/LmgrepCore.ts";
 
 const SEARCH_TOOL = "lmgrep_search";
 const ASK_TOOL = "lmgrep_ask";
@@ -11,9 +12,9 @@ function shouldShowTools(state: HealthState): boolean {
 }
 
 export default async function (pi: ExtensionAPI) {
-	let core: Awaited<ReturnType<typeof createLmgrepCore>>;
+	let core: LmgrepCore;
 	try {
-		core = await createLmgrepCore({ cwd: process.cwd() });
+		core = await LmgrepCore.open({ cwd: process.cwd() });
 	} catch {
 		// No config, broken config, or index open failure — stay silent.
 		// The user should run `lmgrep init` / `lmgrep index` in their terminal.

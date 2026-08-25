@@ -21,9 +21,7 @@ export class ProviderModuleLoader {
 		return loaded;
 	}
 
-	private async resolve(
-		packageName: string,
-	): Promise<Record<string, unknown>> {
+	private async resolve(packageName: string): Promise<Record<string, unknown>> {
 		// Local resolution first — the common case.
 		try {
 			return await import(packageName);

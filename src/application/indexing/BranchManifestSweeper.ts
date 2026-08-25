@@ -1,7 +1,7 @@
-import { Branch } from "../../domain/project/Branch.js";
 import type { FileManifestRepositoryPort } from "../../domain/ports/FileManifestRepositoryPort.js";
 import type { GitPort } from "../../domain/ports/GitPort.js";
 import type { LoggerPort } from "../../domain/ports/LoggerPort.js";
+import { Branch } from "../../domain/project/Branch.js";
 
 /**
  * Drops manifests for branches git no longer has.
@@ -30,9 +30,7 @@ export class BranchManifestSweeper {
 		for (const stored of await this.manifest.storedBranches()) {
 			if (live.has(stored)) continue;
 			await this.manifest.deleteBranch(stored);
-			this.logger.info(
-				`Swept stale manifest for deleted branch "${stored}"`,
-			);
+			this.logger.info(`Swept stale manifest for deleted branch "${stored}"`);
 		}
 	}
 }

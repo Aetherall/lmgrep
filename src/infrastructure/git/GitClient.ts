@@ -46,7 +46,10 @@ export class GitClient implements GitPort {
 			"refs/heads",
 		);
 		if (!out) return [];
-		return out.split("\n").map((l) => l.trim()).filter(Boolean);
+		return out
+			.split("\n")
+			.map((l) => l.trim())
+			.filter(Boolean);
 	}
 
 	private run(cwd: string, ...args: string[]): string | undefined {

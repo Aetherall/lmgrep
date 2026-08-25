@@ -3,18 +3,19 @@ import type { Chunk } from "../../domain/corpus/Chunk.js";
 import type { ContentHash } from "../../domain/corpus/ContentHash.js";
 import { FileVersion } from "../../domain/corpus/FileVersion.js";
 import type { SourceFile } from "../../domain/corpus/SourceFile.js";
+import type { Vector } from "../../domain/faceting/Vector.js";
+import type { ChunkerPort } from "../../domain/ports/ChunkerPort.js";
 import type {
 	ChunkRepositoryPort,
 	EmbeddedChunk,
 } from "../../domain/ports/ChunkRepositoryPort.js";
-import type { ChunkerPort } from "../../domain/ports/ChunkerPort.js";
 import type { EmbedderPort } from "../../domain/ports/EmbedderPort.js";
 import type { FileManifestRepositoryPort } from "../../domain/ports/FileManifestRepositoryPort.js";
 import type { IndexMaintenancePort } from "../../domain/ports/IndexMaintenancePort.js";
 import type { LoggerPort } from "../../domain/ports/LoggerPort.js";
 import type { WorkspacePort } from "../../domain/ports/WorkspacePort.js";
-import type { Vector } from "../../domain/faceting/Vector.js";
 import type { DatabaseLocation } from "../../domain/project/DatabaseLocation.js";
+import type { DatabaseLocks } from "../../infrastructure/fs/DatabaseLocks.js";
 import type { BranchBootstrapper } from "./BranchBootstrapper.js";
 import type { BranchManifestSweeper } from "./BranchManifestSweeper.js";
 import { Duration } from "./Duration.js";
@@ -40,6 +41,8 @@ export interface IndexBuilderDependencies {
 	logger: LoggerPort;
 	config: LmgrepConfig;
 	location: DatabaseLocation;
+	/** Serializes writes against any other indexer on this database. */
+	locks: DatabaseLocks;
 	/** Records the model and dimensions this run indexed with. */
 	recordMetadata: (dimensions: number | undefined) => void;
 	/** Reloads a wedged local model mid-run; false when not possible. */
@@ -59,7 +62,17 @@ export interface IndexBuilderDependencies {
 export class IndexBuilder {
 	constructor(private readonly deps: IndexBuilderDependencies) {}
 
+	/**
+	 * Held for the whole run: a watcher and an ad-hoc `lmgrep index` must not
+	 * write concurrently, or they race into duplicate chunk rows.
+	 */
 	async build(options: IndexBuildOptions = {}): Promise<IndexBuildResult> {
+		return this.deps.locks.withWriteLock(() => this.buildLocked(options));
+	}
+
+	private async buildLocked(
+		options: IndexBuildOptions,
+	): Promise<IndexBuildResult> {
 		const { logger } = this.deps;
 
 		if (options.reset) {
@@ -220,18 +233,14 @@ export class IndexBuilder {
 		const existing = await this.deps.chunks.existingHashes(
 			chunks.map((c) => c.hash),
 		);
-		let candidates = chunks.filter(
-			(c) => !existing.has(c.hash.toString()),
-		);
+		let candidates = chunks.filter((c) => !existing.has(c.hash.toString()));
 		const alreadyIndexed = chunks.length - candidates.length;
 
 		let oversized = 0;
 		const maxTokens = this.deps.config.maxTokens;
 		if (maxTokens) {
 			const before = candidates.length;
-			candidates = candidates.filter(
-				(c) => c.estimatedTokens() <= maxTokens,
-			);
+			candidates = candidates.filter((c) => c.estimatedTokens() <= maxTokens);
 			oversized = before - candidates.length;
 		}
 

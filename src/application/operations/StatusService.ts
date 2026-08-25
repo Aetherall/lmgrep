@@ -1,4 +1,5 @@
 import type { LmgrepConfig } from "../../domain/config/LmgrepConfig.js";
+import type { Vector } from "../../domain/faceting/Vector.js";
 import type { ChunkRepositoryPort } from "../../domain/ports/ChunkRepositoryPort.js";
 import type { EmbedderPort } from "../../domain/ports/EmbedderPort.js";
 import type { DatabaseLocation } from "../../domain/project/DatabaseLocation.js";
@@ -94,7 +95,7 @@ export class StatusService {
 	}> {
 		const deadline = Deadline.after(StatusService.PROBE_TIMEOUT_MS);
 
-		let vector;
+		let vector: Vector;
 		let embeddingLatencyMs: number;
 		try {
 			const started = Date.now();
@@ -106,8 +107,7 @@ export class StatusService {
 			return {
 				embeddingOk: false,
 				searchOk: false,
-				embeddingError:
-					err instanceof Error ? err.message : String(err),
+				embeddingError: err instanceof Error ? err.message : String(err),
 			};
 		}
 

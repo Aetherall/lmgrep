@@ -142,8 +142,7 @@ export class TreeSitterChunker implements ChunkerPort {
 					node.endPosition.row + 1,
 				),
 				type: node.type,
-				name:
-					this.nodeName(node) ?? `anonymous_${node.startPosition.row}`,
+				name: this.nodeName(node) ?? `anonymous_${node.startPosition.row}`,
 				content,
 				context: this.context.build(node, filePath, source, language),
 				hash: ContentHash.of(content),

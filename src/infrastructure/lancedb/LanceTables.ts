@@ -1,5 +1,5 @@
-import { connect, type Connection, type Table } from "@lancedb/lancedb";
 import { mkdirSync } from "node:fs";
+import { type Connection, connect, type Table } from "@lancedb/lancedb";
 import type { Branch } from "../../domain/project/Branch.js";
 
 /**
@@ -117,11 +117,7 @@ export class LanceTables {
 		column: string,
 		values: readonly string[],
 	): Promise<void> {
-		for (
-			let i = 0;
-			i < values.length;
-			i += LanceTables.FILTER_BATCH_SIZE
-		) {
+		for (let i = 0; i < values.length; i += LanceTables.FILTER_BATCH_SIZE) {
 			const batch = values.slice(i, i + LanceTables.FILTER_BATCH_SIZE);
 			await table.delete(LanceTables.inFilter(column, batch));
 		}
@@ -134,11 +130,7 @@ export class LanceTables {
 		values: readonly string[],
 	): Promise<Set<string>> {
 		const found = new Set<string>();
-		for (
-			let i = 0;
-			i < values.length;
-			i += LanceTables.FILTER_BATCH_SIZE
-		) {
+		for (let i = 0; i < values.length; i += LanceTables.FILTER_BATCH_SIZE) {
 			const batch = values.slice(i, i + LanceTables.FILTER_BATCH_SIZE);
 			const rows = await table
 				.query()

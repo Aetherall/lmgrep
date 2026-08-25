@@ -1,10 +1,10 @@
-import { Vector } from "../../domain/faceting/Vector.js";
+import type { Vector } from "../../domain/faceting/Vector.js";
 import type {
 	EmbeddedTerm,
 	ScoredTerm,
 	VocabRepositoryPort,
 } from "../../domain/ports/VocabRepositoryPort.js";
-import { LanceTables, TableName } from "./LanceTables.js";
+import { type LanceTables, TableName } from "./LanceTables.js";
 import { VectorIndexPolicy } from "./VectorIndexPolicy.js";
 
 interface VocabRow extends Record<string, unknown> {

@@ -53,8 +53,7 @@ export class LocalModelReloader {
 				body: JSON.stringify({
 					model: modelId,
 					context_length:
-						this.config.maxTokens ??
-						LocalModelReloader.DEFAULT_CONTEXT_LENGTH,
+						this.config.maxTokens ?? LocalModelReloader.DEFAULT_CONTEXT_LENGTH,
 				}),
 			});
 			await res.json();
