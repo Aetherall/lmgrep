@@ -112,15 +112,13 @@ export class FacetCommand {
 			.option("-v, --verbose", "Show top vocab candidates per cluster")
 			.option("--database <name-or-path>", CliOptions.DATABASE)
 			.action(async (path: string, options: ViewOptions) => {
-				await this.context.guarded(async () => {
-					await this.context.withLmgrep(options, async (lmgrep) => {
-						const view = await lmgrep.facetList(path);
-						if (options.json) {
-							this.context.renderer.json(view);
-							return;
-						}
-						this.renderView(view, options);
-					});
+				await this.context.withLmgrep(options, async (lmgrep) => {
+					const view = await lmgrep.facetList(path);
+					if (options.json) {
+						this.context.renderer.json(view);
+						return;
+					}
+					this.renderView(view, options);
 				});
 			});
 	}
@@ -137,20 +135,18 @@ export class FacetCommand {
 					path: string,
 					options: GlobalOptions & { json?: boolean; compact?: boolean },
 				) => {
-					await this.context.guarded(async () => {
-						await this.context.withLmgrep(options, async (lmgrep) => {
-							const contents = await lmgrep.facetShow(path);
-							const { renderer } = this.context;
-							if (options.json) {
-								renderer.json(contents);
-							} else if (contents.results.length === 0) {
-								renderer.line("(empty)");
-							} else if (options.compact) {
-								renderer.hitPaths(contents.results);
-							} else {
-								renderer.hits(contents.results);
-							}
-						});
+					await this.context.withLmgrep(options, async (lmgrep) => {
+						const contents = await lmgrep.facetShow(path);
+						const { renderer } = this.context;
+						if (options.json) {
+							renderer.json(contents);
+						} else if (contents.results.length === 0) {
+							renderer.line("(empty)");
+						} else if (options.compact) {
+							renderer.hitPaths(contents.results);
+						} else {
+							renderer.hits(contents.results);
+						}
 					});
 				},
 			);
@@ -165,21 +161,19 @@ export class FacetCommand {
 			.option("-v, --verbose", "Show top vocab candidates per cluster")
 			.option("--database <name-or-path>", CliOptions.DATABASE)
 			.action(async (path: string, options: ViewOptions & { k: string }) => {
-				await this.context.guarded(async () => {
-					await this.context.withLmgrep(options, async (lmgrep) => {
-						const view = await lmgrep.facetRefine(path, {
-							k: Ctx.integer(options.k, 5),
-						});
-						if (options.json) {
-							this.context.renderer.json(view);
-							return;
-						}
-						if (view.labels.length === 0) {
-							this.context.renderer.line("(nothing to refine)");
-							return;
-						}
-						this.renderView(view, options);
+				await this.context.withLmgrep(options, async (lmgrep) => {
+					const view = await lmgrep.facetRefine(path, {
+						k: Ctx.integer(options.k, 5),
 					});
+					if (options.json) {
+						this.context.renderer.json(view);
+						return;
+					}
+					if (view.labels.length === 0) {
+						this.context.renderer.line("(nothing to refine)");
+						return;
+					}
+					this.renderView(view, options);
 				});
 			});
 	}

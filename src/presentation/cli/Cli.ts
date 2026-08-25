@@ -42,7 +42,17 @@ export class Cli {
 			await import("../../mcp.js");
 			return;
 		}
-		await this.program.parseAsync(argv);
+
+		try {
+			await this.program.parseAsync(argv);
+		} catch (err) {
+			// Every failure reaching here is a user-facing condition — no
+			// index, an unreachable provider, incompatible embeddings — not a
+			// defect. Report the message and set an exit code; a stack trace
+			// would only bury it. Guarding once here means no command can
+			// forget to.
+			this.context.fail(err);
+		}
 	}
 
 	private static looksLikeStdioLaunch(argv: string[]): boolean {

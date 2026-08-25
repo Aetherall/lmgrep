@@ -36,39 +36,36 @@ export class AskCommand {
 
 	private async run(question: string, options: AskOptions): Promise<void> {
 		const { renderer } = this.context;
-		await this.context.guarded(async () => {
-			await this.context.withLmgrep(options, async (lmgrep) => {
-				const result = await lmgrep.ask(
-					question,
-					options.quiet
-						? undefined
-						: (entry) =>
-								process.stderr.write(`${Renderer.formatTrace(entry)}\n`),
-				);
+		await this.context.withLmgrep(options, async (lmgrep) => {
+			const result = await lmgrep.ask(
+				question,
+				options.quiet
+					? undefined
+					: (entry) => process.stderr.write(`${Renderer.formatTrace(entry)}\n`),
+			);
 
-				if (options.json) {
-					renderer.json(result);
-					return;
+			if (options.json) {
+				renderer.json(result);
+				return;
+			}
+
+			if (!options.quiet) process.stderr.write("\n");
+			renderer.line(result.answer);
+
+			if (result.sources.length > 0) {
+				renderer.line("\nSources:");
+				for (const s of result.sources) {
+					renderer.line(`  [${s.n}] ${s.path}:${s.startLine}-${s.endLine}`);
 				}
+			}
 
-				if (!options.quiet) process.stderr.write("\n");
-				renderer.line(result.answer);
-
-				if (result.sources.length > 0) {
-					renderer.line("\nSources:");
-					for (const s of result.sources) {
-						renderer.line(`  [${s.n}] ${s.path}:${s.startLine}-${s.endLine}`);
-					}
-				}
-
-				const seconds = (result.elapsedMs / 1000).toFixed(1);
-				const degraded = result.degraded
-					? " (degraded: synthesis unavailable)"
-					: "";
-				process.stderr.write(
-					`\n(${result.steps} steps, ${seconds}s)${degraded}\n`,
-				);
-			});
+			const seconds = (result.elapsedMs / 1000).toFixed(1);
+			const degraded = result.degraded
+				? " (degraded: synthesis unavailable)"
+				: "";
+			process.stderr.write(
+				`\n(${result.steps} steps, ${seconds}s)${degraded}\n`,
+			);
 		});
 	}
 }

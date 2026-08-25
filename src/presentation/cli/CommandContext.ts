@@ -47,21 +47,13 @@ export class CommandContext {
 
 	/**
 	 * Report a failure the way a CLI should: message on stderr, non-zero exit,
-	 * no stack trace. Errors here are user-facing conditions (no index, bad
-	 * path, unreachable provider), not defects.
+	 * no stack trace. Errors reaching here are user-facing conditions (no
+	 * index, bad path, unreachable provider, incompatible embeddings), not
+	 * defects. Called once from {@link Cli.run} so no command can forget to.
 	 */
 	fail(error: unknown): void {
 		this.renderer.error(error instanceof Error ? error.message : String(error));
 		process.exitCode = 1;
-	}
-
-	/** Run `body`, converting a thrown error into a reported failure. */
-	async guarded(body: () => Promise<void>): Promise<void> {
-		try {
-			await body();
-		} catch (err) {
-			this.fail(err);
-		}
 	}
 
 	/** Parse a comma-separated option into trimmed values. */

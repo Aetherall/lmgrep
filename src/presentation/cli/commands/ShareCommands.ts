@@ -48,23 +48,21 @@ export class ShareCommands {
 
 	private async runExport(): Promise<void> {
 		const { renderer } = this.context;
-		await this.context.guarded(async () => {
-			const { branch, location, metadata } = this.resolve();
-			const tables = new LanceTables(location, branch);
-			const share = new IndexShare(new RowReplication(tables, branch));
+		const { branch, location, metadata } = this.resolve();
+		const tables = new LanceTables(location, branch);
+		const share = new IndexShare(new RowReplication(tables, branch));
 
-			const { code, done } = await share.send(metadata, {
-				onProgress: (sent, total) =>
-					process.stderr.write(`\rSending: ${sent}/${total} chunks`),
-			});
-
-			renderer.line(`Share code: ${code}`);
-			renderer.line("Waiting for peer... (Ctrl+C to cancel)\n");
-			await done;
-			process.stderr.write("\n");
-			renderer.line("Transfer complete.");
-			tables.close();
+		const { code, done } = await share.send(metadata, {
+			onProgress: (sent, total) =>
+				process.stderr.write(`\rSending: ${sent}/${total} chunks`),
 		});
+
+		renderer.line(`Share code: ${code}`);
+		renderer.line("Waiting for peer... (Ctrl+C to cancel)\n");
+		await done;
+		process.stderr.write("\n");
+		renderer.line("Transfer complete.");
+		tables.close();
 	}
 
 	private registerImport(program: Command): void {
@@ -84,13 +82,11 @@ export class ShareCommands {
 		source: string | undefined,
 		options: { reset?: boolean },
 	): Promise<void> {
-		await this.context.guarded(async () => {
-			if (source && ShareCode.looksLikeCode(source)) {
-				await this.importFromPeer(source, options);
-				return;
-			}
-			await this.importFromDatabase(source, options);
-		});
+		if (source && ShareCode.looksLikeCode(source)) {
+			await this.importFromPeer(source, options);
+			return;
+		}
+		await this.importFromDatabase(source, options);
 	}
 
 	private async importFromPeer(
