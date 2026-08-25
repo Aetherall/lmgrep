@@ -12,6 +12,13 @@ export interface WatchHandle {
 	close(): void;
 }
 
+/** Files whose on-disk hash differs from what the manifest recorded. */
+export interface ChangeSet {
+	changed: SourceFile[];
+	/** Hash of every readable file scanned, changed or not. */
+	current: Map<string, ContentHash>;
+}
+
 /**
  * The working tree: which files exist, what they contain, and when they
  * change. The indexer talks to this rather than to `node:fs` directly.
@@ -30,6 +37,17 @@ export interface WorkspacePort {
 	/** Keep only files modified at or after `cutoffMs`. */
 	modifiedSince(files: string[], cwd: string, cutoffMs: number): string[];
 
+	/**
+	 * Compare on-disk hashes against a manifest, reporting what differs.
+	 * `force` treats every readable file as changed.
+	 */
+	detectChanges(
+		files: string[],
+		manifest: { versionOf(path: string): ContentHash | undefined },
+		cwd: string,
+		force?: boolean,
+	): ChangeSet;
+
 	/** Watch for changes, debounced, reporting the paths that changed. */
 	watch(
 		cwd: string,
@@ -38,11 +56,4 @@ export interface WorkspacePort {
 		debounceMs: number,
 		extensions?: ExtensionRules,
 	): WatchHandle;
-}
-
-/** Files whose on-disk hash differs from what the manifest recorded. */
-export interface ChangeSet {
-	changed: SourceFile[];
-	/** Hash of every readable file scanned, changed or not. */
-	current: Map<string, ContentHash>;
 }
