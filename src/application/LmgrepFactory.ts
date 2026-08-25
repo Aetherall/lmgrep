@@ -10,6 +10,7 @@ import { LocalModelReloader } from "../infrastructure/ai/LocalModelReloader.js";
 import { ConfigLoader } from "../infrastructure/fs/ConfigLoader.js";
 import { DatabaseLocks } from "../infrastructure/fs/DatabaseLocks.js";
 import { ConsoleLogger } from "../infrastructure/fs/Loggers.js";
+import { ProjectIndexes } from "../infrastructure/fs/ProjectIndexes.js";
 import { ProjectMetadataStore } from "../infrastructure/fs/ProjectMetadataStore.js";
 import { ProjectRegistry } from "../infrastructure/fs/ProjectRegistry.js";
 import { StateDirectory } from "../infrastructure/fs/StateDirectory.js";
@@ -24,6 +25,7 @@ import { BranchBootstrapper } from "./indexing/BranchBootstrapper.js";
 import { BranchManifestSweeper } from "./indexing/BranchManifestSweeper.js";
 import { IndexBuilder } from "./indexing/IndexBuilder.js";
 import { Lmgrep, type LmgrepServices } from "./Lmgrep.js";
+import { IndexAlternatives } from "./operations/IndexAlternatives.js";
 import { StatusService } from "./operations/StatusService.js";
 import { WatchService } from "./operations/WatchService.js";
 import { ResearchAgent } from "./research/ResearchAgent.js";
@@ -84,6 +86,13 @@ export class LmgrepFactory {
 		const location = locator.resolveDatabase(cwd, options.database);
 		const metadata = new ProjectMetadataStore();
 		const registry = new ProjectRegistry(state);
+		const alternatives = new IndexAlternatives(
+			new ProjectIndexes(metadata),
+			locator,
+			location,
+			config,
+			cwd,
+		);
 		const locks = new DatabaseLocks(
 			state.locksDirectory(),
 			location.path,
@@ -157,6 +166,7 @@ export class LmgrepFactory {
 			config,
 			logger,
 			() => metadata.read(location.path),
+			alternatives,
 		);
 
 		const services: LmgrepServices = {
@@ -171,6 +181,7 @@ export class LmgrepFactory {
 			maintenance,
 			metadata,
 			registry,
+			alternatives,
 			embedder,
 			chunker,
 			builder,
@@ -186,6 +197,7 @@ export class LmgrepFactory {
 				config,
 				cwd,
 				loader.sources,
+				alternatives,
 			),
 			watcher: new WatchService(builder, workspace, config, cwd, logger, locks),
 			researcher: new ResearchAgent(

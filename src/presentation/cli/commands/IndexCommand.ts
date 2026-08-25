@@ -39,6 +39,12 @@ export class IndexCommand {
 
 	private async run(options: IndexOptions): Promise<void> {
 		await this.context.withLmgrep(options, async (lmgrep) => {
+			// Said before the work starts, not after: embedding a repository
+			// with a newly configured model can take a long time, and someone
+			// who only meant to try a model out should get the chance to put
+			// the old one back instead of watching it run.
+			this.context.renderer.newModelNotice(lmgrep.alternatives.others());
+
 			const result = await lmgrep.build({
 				reset: options.reset,
 				verbose: options.verbose,

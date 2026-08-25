@@ -5,6 +5,8 @@ import type { LoggerPort } from "../../domain/ports/LoggerPort.js";
 import type { IndexMetadata } from "../../domain/project/IndexMetadata.js";
 import { ModelIdentity } from "../../domain/project/ModelIdentity.js";
 import { HitList } from "../../domain/retrieval/HitList.js";
+import { MissingIndexError } from "../../domain/retrieval/MissingIndexError.js";
+import type { IndexAlternatives } from "../operations/IndexAlternatives.js";
 import type { SearchCriteria } from "./SearchCriteria.js";
 import type {
 	SearchTarget,
@@ -29,6 +31,7 @@ export class SearchService {
 		private readonly config: LmgrepConfig,
 		private readonly logger: LoggerPort,
 		private readonly readMetadata: () => IndexMetadata | undefined,
+		private readonly alternatives: IndexAlternatives,
 	) {}
 
 	async search(query: string, criteria: SearchCriteria): Promise<HitList> {
@@ -38,6 +41,17 @@ export class SearchService {
 		try {
 			const merged = await this.retrieveFrom(targets, queryVector, criteria);
 			return merged.filtered((hit) => criteria.admits(hit));
+		} catch (err) {
+			// "No index found" is accurate and useless on its own: the usual
+			// cause is a model change, and the index the user is thinking of is
+			// intact one directory away.
+			if (err instanceof MissingIndexError) {
+				const absence = this.alternatives.explainAbsence();
+				if (absence) {
+					throw new MissingIndexError(`${absence.reason}\n${absence.fix}`);
+				}
+			}
+			throw err;
 		} finally {
 			await this.targets.release(targets);
 		}

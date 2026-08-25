@@ -1,6 +1,7 @@
 import type { TidyReport } from "../../application/Lmgrep.js";
 import type { Inventory } from "../../application/operations/IndexInventory.js";
 import type { StatusInfo } from "../../application/operations/StatusService.js";
+import type { ProjectIndex } from "../../domain/ports/ProjectIndexesPort.js";
 import type { TraceEntry } from "../../domain/research/ResearchTrace.js";
 import type { Hit } from "../../domain/retrieval/Hit.js";
 import { DiskUsage } from "../../infrastructure/fs/DiskUsage.js";
@@ -202,7 +203,8 @@ export class Renderer {
 			this.out(
 				`  ${label} (pid ${proc.pid})${proc.watching ? ", watching" : ""}`,
 			);
-			this.out(`    index: ${proc.projectRoot ?? "unknown"}`);
+			this.out(`    project: ${proc.projectRoot ?? "unknown"}`);
+			if (proc.databasePath) this.out(`    index:   ${proc.databasePath}`);
 		}
 	}
 
@@ -232,6 +234,32 @@ export class Renderer {
 		if (files.length > SHOWN) {
 			this.out(`    ... and ${files.length - SHOWN} more`);
 		}
+	}
+
+	/**
+	 * Warn that this run builds a *second* index for the project.
+	 *
+	 * Silent unless another model's index already exists, which is the only
+	 * case where a full re-embed is about to happen for a reason the user may
+	 * not have intended.
+	 */
+	newModelNotice(others: readonly ProjectIndex[]): void {
+		if (others.length === 0) return;
+		this.out(
+			"This project is already indexed with " +
+				others
+					.map(
+						(o) =>
+							`${o.model ?? "an unrecorded model"} (${DiskUsage.format(o.bytes)})`,
+					)
+					.join(", "),
+		);
+		this.out(
+			"Embedding it again under the newly configured model. The existing index is kept —",
+		);
+		this.out(
+			"setting `model` back returns to it instantly. `lmgrep projects` lists both.\n",
+		);
 	}
 
 	/** What a maintenance pass changed; silent when it changed nothing. */

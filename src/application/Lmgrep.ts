@@ -25,6 +25,7 @@ import type {
 	IndexBuildOptions,
 	IndexBuildResult,
 } from "./indexing/IndexingProgress.js";
+import type { IndexAlternatives } from "./operations/IndexAlternatives.js";
 import type { StatusInfo, StatusService } from "./operations/StatusService.js";
 import type { WatchService } from "./operations/WatchService.js";
 import type {
@@ -53,6 +54,7 @@ export interface LmgrepServices {
 	maintenance: IndexMaintenancePort;
 	metadata: IndexMetadataPort;
 	registry: ProjectRegistryPort;
+	alternatives: IndexAlternatives;
 	embedder: EmbedderPort;
 	chunker: ChunkerPort;
 	builder: IndexBuilder;
@@ -143,6 +145,11 @@ export class Lmgrep {
 	/** Every index this machine knows about. */
 	get registry(): ProjectRegistryPort {
 		return this.services.registry;
+	}
+
+	/** This project's indexes under other embedding models. */
+	get alternatives(): IndexAlternatives {
+		return this.services.alternatives;
 	}
 
 	get projectId(): ProjectId {

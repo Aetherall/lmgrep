@@ -167,6 +167,30 @@ Each embedding model gets its own subdirectory. Changing `model` in your config
 selects a different database rather than invalidating the one you have, so
 trying another model costs one re-index and switching back costs nothing.
 
+### Changing your embedding model
+
+The new model has no index yet, so lmgrep says so and names what you already
+have:
+
+```
+$ lmgrep how are webhooks authenticated
+This project has no index for "qwen3-embedding-4b" — but it is indexed with
+"nomic-embed-code".
+Set `model` back to lmstudio:nomic-embed-code to use that index immediately, or
+run `lmgrep index` to embed this project with the new model (the other index is
+kept).
+```
+
+`status` gives the same answer, and `lmgrep index` says what it is about to do
+before it starts — embedding a large repository takes a while, and trying a
+model out should not commit you to it by accident. Both indexes then coexist,
+and `model` decides which one answers.
+
+Note that `serve` and the MCP server read configuration once, at startup. A
+server already running keeps using the model it started with — self-consistent,
+but it will disagree with the CLI until you restart it. `lmgrep status
+--verbose` prints the database each running process is holding.
+
 Projects outside a git repository, and indexes you name yourself, live under
 `~/.local/state/lmgrep/db/`. Lock files and a small pointer registry live
 beside it — that registry is what `lmgrep projects` and cross-project search

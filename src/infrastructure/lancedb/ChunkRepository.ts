@@ -13,6 +13,7 @@ import type { FileManifestRepositoryPort } from "../../domain/ports/FileManifest
 import type { Branch } from "../../domain/project/Branch.js";
 import { Hit } from "../../domain/retrieval/Hit.js";
 import { HitList } from "../../domain/retrieval/HitList.js";
+import { MissingIndexError } from "../../domain/retrieval/MissingIndexError.js";
 import { LanceTables, TableName } from "./LanceTables.js";
 import { SEARCH_COLUMNS, VectorIndexPolicy } from "./VectorIndexPolicy.js";
 
@@ -60,7 +61,7 @@ export class ChunkRepository implements ChunkRepositoryPort {
 	async search(query: ChunkQuery): Promise<HitList> {
 		const table = await this.tables.table(TableName.Chunks);
 		if (!table) {
-			throw new Error("No index found. Run `lmgrep index` first.");
+			throw new MissingIndexError();
 		}
 
 		const versions = query.scopeToBranch

@@ -11,6 +11,7 @@ import type { IndexMetadataPort } from "../../domain/ports/IndexMetadataPort.js"
 import type { DatabaseLocation } from "../../domain/project/DatabaseLocation.js";
 import type { ProjectLocator } from "../../domain/project/ProjectLocator.js";
 import { Deadline } from "./Deadline.js";
+import type { IndexAlternatives } from "./IndexAlternatives.js";
 
 /**
  * Whether search works right now, and if not, the one thing to do about it.
@@ -75,6 +76,7 @@ export class StatusService {
 		private readonly config: LmgrepConfig,
 		private readonly cwd: string,
 		private readonly configSources: readonly ConfigSource[],
+		private readonly alternatives: IndexAlternatives,
 	) {}
 
 	async status(): Promise<StatusInfo> {
@@ -125,11 +127,16 @@ export class StatusService {
 	 */
 	private judge(info: Omit<StatusInfo, "verdict">): StatusVerdict {
 		if (info.fileCount === 0) {
-			return {
-				searchable: false,
-				reason: "This project is not indexed.",
-				fix: "lmgrep index",
-			};
+			// An empty database for the configured model usually means the
+			// model changed, not that the project was never indexed.
+			const absence = this.alternatives.explainAbsence();
+			return absence
+				? { searchable: false, reason: absence.reason, fix: absence.fix }
+				: {
+						searchable: false,
+						reason: "This project is not indexed.",
+						fix: "lmgrep index",
+					};
 		}
 		if (!info.embeddingOk) {
 			return {
