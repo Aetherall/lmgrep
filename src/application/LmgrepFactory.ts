@@ -141,6 +141,7 @@ export class LmgrepFactory {
 			repairer: new RepairService(workspace, chunks, manifest, logger),
 			statusReporter: new StatusService(
 				chunks,
+				maintenance,
 				embedder,
 				locator,
 				metadata,

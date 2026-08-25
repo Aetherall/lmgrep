@@ -26,18 +26,23 @@ pnpm install -g lmgrep
 
 ### 2. Set up an embedding model
 
-The fastest way to get started is with [Ollama](https://ollama.com/):
+Start a local inference server, then let lmgrep configure itself.
+
+With [Ollama](https://ollama.com/):
 
 ```sh
-# Install Ollama
 curl -fsSL https://ollama.com/install.sh | sh
-
-# Pull an embedding model
 ollama pull nomic-embed-text
-
-# Auto-detect and write config
 lmgrep init
 ```
+
+Or with [LM Studio](https://lmstudio.ai): install an embedding model, enable
+the local server, and run `lmgrep init`.
+
+`init` detects whichever server is running, picks an embedding model, and
+writes the provider, base URL and any prefixes that model requires. Where the
+server also reports a chat model it configures `chatModel` too, which is what
+enables `lmgrep ask`.
 
 This creates a config file at `~/.config/lmgrep/config.yml` (Linux) or `~/Library/Application Support/lmgrep/config.yml` (macOS).
 
@@ -71,6 +76,7 @@ lmgrep search "error handling" --file-prefix src/lib --language .ts
 | `lmgrep repair` | Detect and fix index inconsistencies |
 | `lmgrep migrate` | Rename existing index directories to match the current slug scheme |
 | `lmgrep compact` | Reclaim disk, drop stale chunks, and build the vector index |
+| `lmgrep status` | Also reports whether a vector index exists (see below) |
 | `lmgrep export` | Share this project's index with a peer via P2P |
 | `lmgrep import [source]` | Import from a peer (share code) or local database |
 | `lmgrep prune` | Delete the index for the current directory |
@@ -127,6 +133,18 @@ The answer, its `Sources:` list, and a one-line trace (queries run, steps, time)
 ```
 
 Config keys: `chatModel` (required for `ask`), `chatProvider` / `chatBaseURL` (default to the embedding `provider` / `baseURL`), `chatMaxSteps` (default 8), `chatTimeoutMs` (per model call, default 240000).
+
+## The vector index
+
+Above a few thousand chunks lmgrep trains an ANN index over the embeddings.
+Without one, every search brute-force scans the whole table: roughly the
+index's own size in peak memory per query, and an order of magnitude more
+latency. `lmgrep status` reports which mode you are in.
+
+It is built automatically by `lmgrep index`, and by `lmgrep serve` / the MCP
+server on their first catch-up pass. Training briefly needs several GB, so it
+happens once rather than on every incremental update. If `status` reports it
+missing — an index built by an older version, say — `lmgrep compact` builds it.
 
 ## Targeting a database
 

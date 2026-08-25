@@ -84,6 +84,34 @@ export class Renderer {
 		if (info.chunkCount !== info.uniqueHashes) {
 			this.out(`  Duplicates: ${info.chunkCount - info.uniqueHashes}`);
 		}
+		this.vectorIndex(info.vectorIndex);
+	}
+
+	/**
+	 * How searches are answered.
+	 *
+	 * Worth its own line because the difference is invisible otherwise: without
+	 * an index every query scans every embedding, costing roughly the index's
+	 * size in memory and an order of magnitude in latency. Nothing else tells
+	 * the user that is happening.
+	 */
+	private vectorIndex(state: StatusInfo["vectorIndex"]): void {
+		if (state.built) {
+			this.out(
+				state.unindexed > 0
+					? `  Vector index: yes (${state.unindexed} rows awaiting the next optimize)`
+					: "  Vector index: yes",
+			);
+			return;
+		}
+		if (!state.worthBuilding) {
+			this.out("  Vector index: not needed at this size");
+			return;
+		}
+		this.out(
+			"  Vector index: MISSING — every search scans all " +
+				`${state.rows} embeddings. Run \`lmgrep compact\` to build it.`,
+		);
 	}
 
 	statusChecks(info: StatusInfo): void {

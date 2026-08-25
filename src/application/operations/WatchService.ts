@@ -33,6 +33,8 @@ export class WatchService {
 	private watcher: { close(): void } | undefined;
 
 	private holdsLock = false;
+	/** The catch-up build is the one allowed to train a vector index. */
+	private caughtUp = false;
 
 	constructor(
 		private readonly builder: IndexBuilder,
@@ -113,7 +115,20 @@ export class WatchService {
 					? `Changes detected in ${changedFiles.length} file(s), re-indexing...`
 					: "Changes detected, re-indexing...",
 			);
-			await this.builder.build({ files: changedFiles });
+			// Train the vector index on the catch-up build only.
+			//
+			// Without an index every search brute-force scans the table, which
+			// costs roughly the index's own size in peak memory *per query* —
+			// measured at ~1GB a search against a 759MB index, versus ~200MB
+			// once indexed. Training spikes higher (~2.5GB) but does so once,
+			// so for a process that will serve many queries it is the cheaper
+			// option as well as the faster one. Incremental ticks stay off it
+			// and only absorb the tail.
+			await this.builder.build({
+				files: changedFiles,
+				createIndex: !this.caughtUp,
+			});
+			this.caughtUp = true;
 		} catch (err) {
 			this.logger.error(
 				`Index error: ${err instanceof Error ? err.message : err}`,

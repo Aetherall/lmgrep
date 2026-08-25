@@ -44,6 +44,17 @@ export interface OptimizeOptions {
 	create?: boolean;
 }
 
+/** Whether searches are answered by a vector index or a brute-force scan. */
+export interface VectorIndexState {
+	rows: number;
+	/** True when a vector index exists for the chunk table. */
+	built: boolean;
+	/** Rows appended since the index was last refreshed; these are scanned. */
+	unindexed: number;
+	/** False when the table is too small for an index to be worth training. */
+	worthBuilding: boolean;
+}
+
 /** Index upkeep: compaction, ANN index training, and duplicate removal. */
 export interface IndexMaintenancePort {
 	optimize(options?: OptimizeOptions): Promise<OptimizeReport>;
@@ -53,4 +64,6 @@ export interface IndexMaintenancePort {
 	dedupe(): Promise<DedupeReport>;
 	/** Delete every table — a full rebuild from scratch. */
 	reset(): Promise<void>;
+	/** How searches are currently answered. */
+	vectorIndexState(): Promise<VectorIndexState>;
 }

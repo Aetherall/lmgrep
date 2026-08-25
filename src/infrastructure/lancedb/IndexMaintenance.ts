@@ -6,6 +6,7 @@ import type {
 	OptimizeOptions,
 	OptimizeReport,
 	TableOptimizeReport,
+	VectorIndexState,
 } from "../../domain/ports/IndexMaintenancePort.js";
 import { ChunkRepository } from "./ChunkRepository.js";
 import { type LanceTables, TableName } from "./LanceTables.js";
@@ -211,6 +212,34 @@ export class IndexMaintenance implements IndexMaintenancePort {
 		}
 
 		return { before, after: kept.length, duplicateIds, staleVersions };
+	}
+
+	async vectorIndexState(): Promise<VectorIndexState> {
+		const table = await this.tables.table(TableName.Chunks);
+		if (!table) {
+			return { rows: 0, built: false, unindexed: 0, worthBuilding: false };
+		}
+
+		const rows = await table.countRows();
+		const index = (await table.listIndices()).find((i) =>
+			i.columns.includes("vector"),
+		);
+		if (!index) {
+			return {
+				rows,
+				built: false,
+				unindexed: rows,
+				worthBuilding: rows >= VectorIndexPolicy.MIN_ROWS_FOR_ANN,
+			};
+		}
+
+		const stats = await table.indexStats(index.name);
+		return {
+			rows,
+			built: true,
+			unindexed: stats?.numUnindexedRows ?? 0,
+			worthBuilding: true,
+		};
 	}
 
 	async reset(): Promise<void> {

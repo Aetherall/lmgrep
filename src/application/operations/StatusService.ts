@@ -2,6 +2,10 @@ import type { LmgrepConfig } from "../../domain/config/LmgrepConfig.js";
 import type { Vector } from "../../domain/corpus/Vector.js";
 import type { ChunkRepositoryPort } from "../../domain/ports/ChunkRepositoryPort.js";
 import type { EmbedderPort } from "../../domain/ports/EmbedderPort.js";
+import type {
+	IndexMaintenancePort,
+	VectorIndexState,
+} from "../../domain/ports/IndexMaintenancePort.js";
 import type { IndexMetadataPort } from "../../domain/ports/IndexMetadataPort.js";
 import type { DatabaseLocation } from "../../domain/project/DatabaseLocation.js";
 import type { ProjectLocator } from "../../domain/project/ProjectLocator.js";
@@ -23,6 +27,8 @@ export interface StatusInfo {
 	searchLatencyMs?: number;
 	indexModel?: string;
 	indexDimensions?: number;
+	/** How searches are answered: by vector index, or by scanning every row. */
+	vectorIndex: VectorIndexState;
 }
 
 /**
@@ -39,6 +45,7 @@ export class StatusService {
 
 	constructor(
 		private readonly chunks: ChunkRepositoryPort,
+		private readonly maintenance: IndexMaintenancePort,
 		private readonly embedder: EmbedderPort,
 		private readonly locator: ProjectLocator,
 		private readonly metadata: IndexMetadataPort,
@@ -76,6 +83,7 @@ export class StatusService {
 			chunkCount,
 			uniqueHashes: hashes.size,
 			...probe,
+			vectorIndex: await this.maintenance.vectorIndexState(),
 			indexModel: meta?.model,
 			indexDimensions: meta?.dimensions,
 		};

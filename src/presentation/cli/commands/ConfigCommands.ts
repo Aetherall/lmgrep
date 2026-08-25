@@ -4,7 +4,9 @@ import { dirname, join } from "node:path";
 import type { Command } from "commander";
 import { ModelIdentity } from "../../../domain/project/ModelIdentity.js";
 import { ProjectLocator } from "../../../domain/project/ProjectLocator.js";
-import { OllamaProbe } from "../../../infrastructure/ai/OllamaProbe.js";
+import { EmbeddingPrefixes } from "../../../infrastructure/ai/EmbeddingPrefixes.js";
+import { LocalRuntimeDetector } from "../../../infrastructure/ai/LocalRuntimeDetector.js";
+import type { DetectedRuntime } from "../../../infrastructure/ai/ModelRuntime.js";
 import { ConfigLoader } from "../../../infrastructure/fs/ConfigLoader.js";
 import { ProjectMetadataStore } from "../../../infrastructure/fs/ProjectMetadataStore.js";
 import { StateDirectory } from "../../../infrastructure/fs/StateDirectory.js";
@@ -60,100 +62,140 @@ export class ConfigCommands {
 			return;
 		}
 
-		const state = new StateDirectory();
-		const locator = new ProjectLocator(new GitClient(), state);
-		const metadata = new ProjectMetadataStore(state);
-		const databasePath = locator.databasePathFor(cwd);
-		const existing = existsSync(databasePath)
-			? metadata.read(databasePath)
-			: undefined;
+		const existing = this.existingIndexMetadata(cwd);
 		const indexFamily = existing?.model
 			? ModelIdentity.of(existing.model).family
 			: undefined;
 
-		const ollama = await new OllamaProbe().detect();
-		if (!ollama.running) {
-			this.reportMissingOllama(existing, indexFamily);
+		const runtime = await new LocalRuntimeDetector().detectBest();
+		if (!runtime) {
+			this.reportNoRuntime(existing, indexFamily);
 			this.write(configPath, ConfigTemplate.render());
 			renderer.line(`\nWrote ${configPath} (edit model before indexing)`);
 			return;
 		}
 
-		renderer.line("Found Ollama.");
-		const model = this.selectModel(ollama.models, existing, indexFamily);
+		renderer.line(`Found ${runtime.label}.`);
+		const model = this.selectEmbeddingModel(runtime, existing, indexFamily);
+		const chatModel = model ? this.selectChatModel(runtime) : undefined;
 
 		this.write(
 			configPath,
 			ConfigTemplate.render({
-				model: model ? `ollama:${model}` : undefined,
-				baseURL: model ? OllamaProbe.BASE_URL : undefined,
+				model: model ? `${runtime.providerId}:${model}` : undefined,
+				baseURL: model ? runtime.baseURL : undefined,
+				providerPackage: model ? runtime.providerPackage : undefined,
+				local: model ? true : undefined,
+				chatModel: chatModel ? `${runtime.providerId}:${chatModel}` : undefined,
+				prefixes: model ? EmbeddingPrefixes.forModel(model) : undefined,
 			}),
 		);
 		renderer.line(`Wrote ${configPath}`);
 	}
 
 	/**
-	 * Choose a model, respecting an existing index's family above all else —
-	 * a mismatch produces incomparable vectors, not merely worse results.
+	 * Choose an embedding model, respecting an existing index's family above
+	 * all else — a mismatch produces incomparable vectors, not merely worse
+	 * results, so it is better to configure nothing than the wrong thing.
 	 */
-	private selectModel(
-		available: string[],
+	private selectEmbeddingModel(
+		runtime: DetectedRuntime,
 		existing: { model?: string; dimensions?: number } | undefined,
 		indexFamily: string | undefined,
 	): string | undefined {
 		const { renderer } = this.context;
+		const embedders = LocalRuntimeDetector.embeddingModels(runtime);
+		// Runtimes that do not type their models still list them; treat the
+		// untyped ones as last-resort candidates.
+		const candidates = [
+			...embedders,
+			...LocalRuntimeDetector.untypedModels(runtime),
+		];
 
-		if (indexFamily && existing?.dimensions) {
+		if (indexFamily) {
 			renderer.line(
-				`Index built with "${existing.model}" (${indexFamily}, ${existing.dimensions} dims)`,
+				`Index built with "${existing?.model}" (${indexFamily}${existing?.dimensions ? `, ${existing.dimensions} dims` : ""})`,
 			);
-			const compatible = available.find(
-				(m) => ModelIdentity.of(`ollama:${m}`).family === indexFamily,
+			const compatible = candidates.find(
+				(m) =>
+					ModelIdentity.of(`${runtime.providerId}:${m.id}`).family ===
+					indexFamily,
 			);
 			if (compatible) {
-				renderer.line(`Found compatible model: ${compatible}`);
-				return compatible;
+				renderer.line(`Found compatible model: ${compatible.id}`);
+				return compatible.id;
 			}
 			renderer.line(
-				`\nNo compatible model found locally. You need a model from the "${indexFamily}" family.`,
+				`\nNo compatible model available. You need one from the "${indexFamily}" family.`,
 			);
-			renderer.line("Pull one with:");
-			renderer.line(`  ollama pull ${indexFamily}\n`);
-			renderer.line("Then run `lmgrep init` again to auto-configure.");
+			renderer.line(
+				`Install it in ${runtime.label}, then run \`lmgrep init\` again.`,
+			);
 			return undefined;
 		}
 
-		if (indexFamily) return undefined;
-
-		const picked = OllamaProbe.pickEmbeddingModel(available);
-		if (picked) {
-			renderer.line(`Using model: ${picked}`);
-			return picked;
+		const picked = embedders[0] ?? candidates[0];
+		if (!picked) {
+			renderer.line(`\nNo models available in ${runtime.label}.`);
+			renderer.line(
+				"Install an embedding model (e.g. nomic-embed-text), then run `lmgrep init` again.",
+			);
+			return undefined;
 		}
-		renderer.line("\nNo models found. Pull an embedding model:");
-		renderer.line("  ollama pull nomic-embed-text\n");
-		renderer.line("Then run `lmgrep init` again.");
-		return undefined;
+
+		renderer.line(`Using embedding model: ${picked.id}`);
+		if (picked.kind !== "embedding") {
+			renderer.line(
+				"  (this model's type could not be confirmed — check it is an embedder)",
+			);
+		}
+		const prefixes = EmbeddingPrefixes.forModel(picked.id);
+		if (prefixes) {
+			renderer.line(
+				`  ${prefixes.family} is asymmetric — writing its required prefixes`,
+			);
+		}
+		return picked.id;
 	}
 
-	private reportMissingOllama(
+	/**
+	 * Pick a model for `ask`, but only one the runtime typed as a chat model.
+	 * Guessing here surfaces as a confusing failure much later, at answer time.
+	 */
+	private selectChatModel(runtime: DetectedRuntime): string | undefined {
+		const [picked] = LocalRuntimeDetector.chatModels(runtime);
+		if (!picked) return undefined;
+		this.context.renderer.line(`Using chat model for \`ask\`: ${picked.id}`);
+		return picked.id;
+	}
+
+	private existingIndexMetadata(cwd: string) {
+		const state = new StateDirectory();
+		const locator = new ProjectLocator(new GitClient(), state);
+		const databasePath = locator.databasePathFor(cwd);
+		return existsSync(databasePath)
+			? new ProjectMetadataStore(state).read(databasePath)
+			: undefined;
+	}
+
+	private reportNoRuntime(
 		existing: { model?: string; dimensions?: number } | undefined,
 		indexFamily: string | undefined,
 	): void {
 		const { renderer } = this.context;
-		renderer.line("Ollama not detected.\n");
-		renderer.line("Install Ollama:");
-		renderer.line("  curl -fsSL https://ollama.com/install.sh | sh\n");
+		renderer.line("No local embedding server detected.\n");
+		renderer.line("Start one of:");
+		renderer.line("  Ollama     curl -fsSL https://ollama.com/install.sh | sh");
+		renderer.line("  LM Studio  https://lmstudio.ai — enable the local server");
+		renderer.line("");
 		if (indexFamily && existing) {
 			renderer.line(
 				`This index was built with "${existing.model}" (${existing.dimensions} dims).`,
 			);
-			renderer.line(
-				"After installing Ollama, pull a compatible model and run `lmgrep init` again.",
-			);
+			renderer.line("Load a compatible model, then run `lmgrep init` again.");
 		} else {
 			renderer.line(
-				"After installing, run `lmgrep init` again to auto-configure.",
+				"Then run `lmgrep init` again to auto-configure, or edit the config by hand.",
 			);
 		}
 	}

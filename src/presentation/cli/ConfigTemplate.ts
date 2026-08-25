@@ -1,3 +1,13 @@
+/** Everything `init` managed to work out about the local setup. */
+export interface DetectedSettings {
+	model?: string;
+	baseURL?: string;
+	providerPackage?: string;
+	local?: boolean;
+	chatModel?: string;
+	prefixes?: { query: string; document: string; family: string };
+}
+
 /**
  * The starter `config.yml` written by `lmgrep init`.
  *
@@ -6,13 +16,34 @@
  * they never knew existed is one line away rather than in a README.
  */
 export class ConfigTemplate {
-	static render(overrides?: { model?: string; baseURL?: string }): string {
-		const modelLine = overrides?.model
-			? `model: ${overrides.model}`
+	static render(detected?: DetectedSettings): string {
+		const modelLine = detected?.model
+			? `model: ${detected.model}`
 			: "# model: ollama:nomic-embed-text  # ← set your model here";
-		const baseURLLine = overrides?.baseURL
-			? `baseURL: ${overrides.baseURL}`
+		const baseURLLine = detected?.baseURL
+			? `baseURL: ${detected.baseURL}`
 			: "# baseURL: http://localhost:11434/v1";
+		const providerLine = detected?.providerPackage
+			? `provider: "${detected.providerPackage}"`
+			: '# provider: "@ai-sdk/openai-compatible"';
+		const localLine = detected?.local ? "local: true" : "# local: true";
+
+		// Asymmetric models need these and fail silently without them, so they
+		// are written out rather than left commented.
+		const prefixLines = detected?.prefixes
+			? [
+					`# ${detected.prefixes.family} models are asymmetric — these prefixes are required.`,
+					`queryPrefix: "${detected.prefixes.query}"`,
+					`documentPrefix: "${detected.prefixes.document}"`,
+				].join("\n")
+			: [
+					'# queryPrefix: "search_query: "',
+					'# documentPrefix: "search_document: "',
+				].join("\n");
+
+		const chatLine = detected?.chatModel
+			? `chatModel: ${detected.chatModel}`
+			: "# chatModel: lmstudio:qwen/qwen3.5-9b";
 
 		return `# lmgrep configuration
 #
@@ -27,21 +58,25 @@ ${modelLine}
 # Base URL for the embedding API
 ${baseURLLine}
 
+# AI SDK package providing the model
+${providerLine}
+
+# Provider runs locally, so health checks may probe it freely
+${localLine}
+
 # Batch size for embedding API calls
 batchSize: 100
 
-# Optional: override the provider package
-# provider: "@ai-sdk/openai"
+${prefixLines}
+
+# Generative model for \`lmgrep ask\`. Optional — without it, \`ask\` is hidden.
+${chatLine}
 
 # Optional: embedding dimensions (if model supports it)
 # dimensions: 384
 
 # Optional: max tokens per chunk (estimated at 4 chars/token)
 # maxTokens: 8192
-
-# Optional: prefixes for asymmetric embedding models
-# queryPrefix: "search_query: "
-# documentPrefix: "search_document: "
 
 # Optional: additional ignore patterns (merged with .gitignore)
 # ignore:
