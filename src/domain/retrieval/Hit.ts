@@ -4,7 +4,7 @@ import type { FileVersion } from "../corpus/FileVersion.js";
 /** A retrieved chunk together with its similarity score. */
 export class Hit {
 	constructor(
-		/** Chunk identity, kept for deduplication and facet session pooling. */
+		/** Chunk identity, used to deduplicate a result page. */
 		readonly id: string,
 		readonly location: CodeLocation,
 		readonly type: string,

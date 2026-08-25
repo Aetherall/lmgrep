@@ -101,14 +101,6 @@ export class LmgrepCore {
 		return ToolDescriptions.SEARCH_PARAMS;
 	}
 
-	get facetParam(): { description: string } {
-		return ToolDescriptions.FACET_PARAM;
-	}
-
-	get facetDescription(): string {
-		return ToolDescriptions.FACET;
-	}
-
 	get listProjectsDescription(): string {
 		return ToolDescriptions.LIST_PROJECTS;
 	}
@@ -159,16 +151,6 @@ export class LmgrepCore {
 			return hits.isEmpty
 				? { text: "No results found." }
 				: { text: HitFormatter.hits(hits.toArray()) };
-		});
-	}
-
-	async executeFacet(args: { query: string }): Promise<ToolResult> {
-		return this.guarded(async () => {
-			const view = await this.lmgrep.facetSearch(args.query, {});
-			this.health.markHealthy();
-			return view.labels.length === 0
-				? { text: "No results found." }
-				: { text: HitFormatter.facets(args.query, view) };
 		});
 	}
 

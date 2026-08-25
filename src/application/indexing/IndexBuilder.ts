@@ -6,7 +6,7 @@ import type {
 	FileManifest,
 	SourceFile,
 } from "../../domain/corpus/SourceFile.js";
-import type { Vector } from "../../domain/faceting/Vector.js";
+import type { Vector } from "../../domain/corpus/Vector.js";
 import type { ChunkerPort } from "../../domain/ports/ChunkerPort.js";
 import type {
 	ChunkRepositoryPort,
@@ -28,7 +28,6 @@ import type {
 	IndexBuildOptions,
 	IndexBuildResult,
 } from "./IndexingProgress.js";
-import type { VocabularyBuilder } from "./VocabularyBuilder.js";
 
 /** Everything the builder collaborates with, named so wiring stays readable. */
 export interface IndexBuilderDependencies {
@@ -38,7 +37,6 @@ export interface IndexBuilderDependencies {
 	chunks: ChunkRepositoryPort;
 	manifest: FileManifestRepositoryPort;
 	maintenance: IndexMaintenancePort;
-	vocabulary: VocabularyBuilder;
 	bootstrapper: BranchBootstrapper;
 	sweeper: BranchManifestSweeper;
 	logger: LoggerPort;
@@ -359,7 +357,6 @@ export class IndexBuilder {
 		let succeeded = 0;
 		let stored = 0;
 		let dimensions: number | undefined;
-		const vocabSource: Array<{ name: string; content: string }> = [];
 
 		const persist = async (
 			items: Array<{ index: number; vector: Vector }>,
@@ -373,11 +370,6 @@ export class IndexBuilder {
 			succeeded += embedded.length;
 			stored += embedded.length;
 			dimensions ??= embedded[0]?.vector.dimensions;
-			if (options.reset) {
-				for (const { chunk } of embedded) {
-					vocabSource.push({ name: chunk.name, content: chunk.content });
-				}
-			}
 			options.onProgress?.({
 				phase: "store",
 				current: stored,
@@ -429,10 +421,6 @@ export class IndexBuilder {
 		);
 
 		this.report(aborted, succeeded, failedIndices.size, changedPaths.length);
-
-		if (options.reset && vocabSource.length > 0) {
-			await this.deps.vocabulary.build(vocabSource);
-		}
 
 		this.deps.recordMetadata(dimensions);
 		await this.runMaintenance(succeeded, options);

@@ -17,20 +17,12 @@ import type { ProjectId } from "../domain/project/ProjectId.js";
 import type { ProjectLocator } from "../domain/project/ProjectLocator.js";
 import type { TraceEntry } from "../domain/research/ResearchTrace.js";
 import type { HitList } from "../domain/retrieval/HitList.js";
-import type {
-	FacetContents,
-	FacetNavigator,
-	FacetOptions,
-	FacetOverview,
-	FacetView,
-} from "./faceting/FacetNavigator.js";
 import type { BranchManifestSweeper } from "./indexing/BranchManifestSweeper.js";
 import type { IndexBuilder } from "./indexing/IndexBuilder.js";
 import type {
 	IndexBuildOptions,
 	IndexBuildResult,
 } from "./indexing/IndexingProgress.js";
-import type { VocabularyBuilder } from "./indexing/VocabularyBuilder.js";
 import type {
 	RepairResult,
 	RepairService,
@@ -61,19 +53,11 @@ export interface LmgrepServices {
 	builder: IndexBuilder;
 	sweeper: BranchManifestSweeper;
 	searcher: SearchService;
-	facets: FacetNavigator;
-	vocabulary: VocabularyBuilder;
 	repairer: RepairService;
 	statusReporter: StatusService;
 	watcher: WatchService;
 	researcher: ResearchAgent;
 	projectId: () => ProjectId;
-	vocabCount: () => Promise<number>;
-	dropVocab: () => Promise<void>;
-	chunkCount: () => Promise<number>;
-	streamChunkTexts: () => AsyncGenerator<
-		Array<{ name: string; content: string }>
-	>;
 }
 
 /**
@@ -106,57 +90,6 @@ export class Lmgrep {
 
 	search(query: string, options: SearchOptions = {}): Promise<HitList> {
 		return this.services.searcher.search(query, new SearchCriteria(options));
-	}
-
-	facet(query: string, options: FacetOptions = {}): Promise<FacetOverview> {
-		return this.services.facets.overview(query, options);
-	}
-
-	facetSearch(query: string, options: FacetOptions = {}): Promise<FacetView> {
-		return this.services.facets.startSession(query, options);
-	}
-
-	facetList(path: string): Promise<FacetView> {
-		return this.services.facets.list(path);
-	}
-
-	facetShow(path: string): Promise<FacetContents> {
-		return this.services.facets.show(path);
-	}
-
-	facetRefine(path: string, options: FacetOptions = {}): Promise<FacetView> {
-		return this.services.facets.refine(path, options);
-	}
-
-	/**
-	 * Rebuild the vocabulary from every indexed chunk. Separate from `build`
-	 * because document frequency computed over a delta is meaningless — the
-	 * whole corpus has to be counted at once.
-	 */
-	async facetIndex(
-		options: { minDf?: number; reset?: boolean } = {},
-	): Promise<{ added: number; total: number }> {
-		if (options.reset) await this.services.dropVocab();
-
-		const chunkCount = await this.services.chunkCount();
-		if (chunkCount === 0) {
-			this.services.logger.info("No chunks indexed. Run `lmgrep index` first.");
-			return { added: 0, total: 0 };
-		}
-
-		this.services.logger.info(
-			`Building vocab from ${chunkCount} chunks (minDf=${options.minDf ?? 10})...`,
-		);
-
-		const texts: Array<{ name: string; content: string }> = [];
-		for await (const batch of this.services.streamChunkTexts()) {
-			texts.push(...batch);
-		}
-
-		const { added } = await this.services.vocabulary.build(texts, {
-			minDf: options.minDf,
-		});
-		return { added, total: await this.services.vocabCount() };
 	}
 
 	ask(

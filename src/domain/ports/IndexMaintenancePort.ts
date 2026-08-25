@@ -10,13 +10,15 @@ export interface TableOptimizeReport {
 	 * `created`       - trained a vector index for the first time.
 	 * `optimized`     - compacted and absorbed the unindexed tail.
 	 * `up-to-date`    - tail still within tolerance, nothing done.
+	 * `dropped`       - a table no longer part of the schema was removed.
 	 */
 	action:
 		| "skipped-small"
 		| "needs-index"
 		| "created"
 		| "optimized"
-		| "up-to-date";
+		| "up-to-date"
+		| "dropped";
 	unindexed?: number;
 }
 

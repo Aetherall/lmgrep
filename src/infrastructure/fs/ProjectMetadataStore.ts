@@ -80,7 +80,7 @@ export class ProjectMetadataStore implements IndexMetadataPort {
 			ProjectMetadataStore.FILE,
 			`${TableName.Chunks}.lance`,
 			`${TableName.Files}.lance`,
-			`${TableName.Vocab}.lance`,
+			`${TableName.LegacyVocab}.lance`,
 		]);
 		return entries.some((e) => markers.has(e));
 	}

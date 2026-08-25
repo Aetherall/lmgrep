@@ -11,7 +11,11 @@ import type { Branch } from "../../domain/project/Branch.js";
 export const TableName = {
 	Chunks: "chunks",
 	Files: "files",
-	Vocab: "vocab",
+	/**
+	 * Written by the removed faceting feature. Nothing reads it; it is listed
+	 * so maintenance can drop it and give the disk back.
+	 */
+	LegacyVocab: "vocab",
 } as const;
 
 export type TableName = (typeof TableName)[keyof typeof TableName];

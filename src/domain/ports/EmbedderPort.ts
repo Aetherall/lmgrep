@@ -1,4 +1,4 @@
-import type { Vector } from "../faceting/Vector.js";
+import type { Vector } from "../corpus/Vector.js";
 
 /**
  * Turns text into embeddings.

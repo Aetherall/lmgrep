@@ -71,6 +71,10 @@ export class MaintenanceCommands {
 							renderer.line(
 								`Skipped vector index on ${table.table}: only ${table.rows} rows.`,
 							);
+						} else if (table.action === "dropped") {
+							renderer.line(
+								`Dropped the unused ${table.table} table (${table.rows} rows).`,
+							);
 						}
 					}
 					renderer.line("Compaction complete.");

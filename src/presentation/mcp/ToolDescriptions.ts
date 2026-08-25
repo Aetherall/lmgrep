@@ -36,24 +36,6 @@ export class ToolDescriptions {
 		"Use this to discover what projects are available for cross-project search " +
 		"via the `project` parameter on the search tool.";
 
-	static readonly FACET = [
-		"**Get a labeled overview of what *kinds* of code match a query, instead of raw results.** Returns 5 clusters, each with a one-word label, a handful of qualifier words describing that cluster's angle, and a size. No file paths, no chunks — just the shape of the result space.",
-		"",
-		"**Use facet when:**",
-		"- The query is broad or exploratory (`auth`, `error handling`, `payment flow`).",
-		"- You don't yet know the vocabulary the codebase uses for a concept — the qualifiers surface the real terms (e.g. `auth` → clusters revealing `fireauth`, `oauth`, `serviceaccount`).",
-		"- A previous `search` returned a heterogeneous mix and you want to see why.",
-		"",
-		"**Do NOT use facet when:** the query is already specific (a symbol, a precise question, an error message). Call `search` directly.",
-		"",
-		'**How to act on the output:** pick the cluster that matches your intent, then call `search` with a narrower query that combines the original intent with the cluster\'s label + qualifiers (e.g. after `facet("auth")` returns a cluster `email: fireauth, phone, provider`, call `search("authentication with fireauth phone provider")`). This uses the corpus\'s own vocabulary and dramatically improves recall.',
-	].join("\n");
-
-	static readonly FACET_PARAM = {
-		description:
-			"Broad, natural-language query to faceted over. Same phrasing as `search`, but use when the query is exploratory and you want to see the categories of matching code.",
-	};
-
 	static readonly ASK_PARAM = {
 		description:
 			'The question to answer, in natural language — phrase it as a real question about the code. Good: "how does the file watcher trigger reindexing", "where are webhooks authenticated and what token format", "what happens when a user is deleted".',

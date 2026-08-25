@@ -1,13 +1,14 @@
 /**
- * An embedding as a value object.
+ * An embedding as a value object: a chunk's meaning, or a query's, as a point
+ * in the model's vector space.
  *
  * Every operation returns a new Vector; none mutate. Raw `number[]` stays the
  * wire format at the LanceDB and provider boundaries — this type is for the
  * domain, where naming the operation matters more than avoiding an allocation.
  *
- * Keep it that way: the clustering path works on tens of vectors at a time, so
- * the allocations are free at this scale. Pushing Vector down into a per-
- * comparison inner loop over a whole table would not be.
+ * Keep it that way. Scoring a whole table happens inside LanceDB, natively;
+ * the operations here run over single queries and result pages, where the
+ * allocations are free.
  */
 export class Vector {
 	private constructor(private readonly values: readonly number[]) {}

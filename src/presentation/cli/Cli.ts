@@ -3,7 +3,6 @@ import { CommandContext } from "./CommandContext.js";
 import { AskCommand } from "./commands/AskCommand.js";
 import { CompletionsCommand } from "./commands/CompletionsCommand.js";
 import { ConfigCommands } from "./commands/ConfigCommands.js";
-import { FacetCommand } from "./commands/FacetCommand.js";
 import { IndexCommand } from "./commands/IndexCommand.js";
 import { MaintenanceCommands } from "./commands/MaintenanceCommands.js";
 import { MigrateCommand } from "./commands/MigrateCommand.js";
@@ -68,7 +67,6 @@ export class Cli {
 			new IndexCommand(this.context),
 			new SearchCommand(this.context),
 			new AskCommand(this.context),
-			new FacetCommand(this.context),
 			new StatusCommand(this.context),
 			new MaintenanceCommands(this.context),
 			new ServerCommands(this.context),

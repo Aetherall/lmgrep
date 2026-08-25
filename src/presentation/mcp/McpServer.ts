@@ -19,7 +19,6 @@ export class LmgrepMcpServer {
 
 	async serve(): Promise<void> {
 		const search = this.registerSearch();
-		this.registerFacet();
 		this.registerListProjects();
 		if (this.core.askAvailable) this.registerAsk();
 
@@ -55,15 +54,6 @@ export class LmgrepMcpServer {
 				project: z.string().optional().describe(params.project.description),
 			},
 			async (args) => this.toContent(await this.core.executeSearch(args)),
-		);
-	}
-
-	private registerFacet() {
-		return this.server.tool(
-			"facet",
-			this.core.facetDescription,
-			{ query: z.string().describe(this.core.facetParam.description) },
-			async (args) => this.toContent(await this.core.executeFacet(args)),
 		);
 	}
 

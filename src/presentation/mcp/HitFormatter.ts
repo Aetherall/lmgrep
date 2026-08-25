@@ -1,4 +1,3 @@
-import type { FacetView } from "../../application/faceting/FacetNavigator.js";
 import type { ResearchResult } from "../../application/research/ResearchAgent.js";
 import type { Hit } from "../../domain/retrieval/Hit.js";
 
@@ -22,17 +21,6 @@ export class HitFormatter {
 				return parts.join("\n");
 			})
 			.join("\n\n---\n\n");
-	}
-
-	static facets(query: string, view: FacetView): string {
-		const header = `Facets for "${query}" (${view.labels.length} clusters):`;
-		const lines = view.labels.map((label, i) => {
-			const qualifiers = view.qualifiers?.[i] ?? [];
-			return `- ${label}${qualifiers.length > 0 ? `: ${qualifiers.join(", ")}` : ""}`;
-		});
-		const footer =
-			"\nPick a cluster and call `search` with a refined query that combines your original intent with the label + qualifiers to drill in.";
-		return [header, ...lines, footer].join("\n");
 	}
 
 	static answer(result: ResearchResult): string {

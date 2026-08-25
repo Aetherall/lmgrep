@@ -1,4 +1,3 @@
-import type { FacetView } from "../../application/faceting/FacetNavigator.js";
 import type { StatusInfo } from "../../application/operations/StatusService.js";
 import type { TraceEntry } from "../../domain/research/ResearchTrace.js";
 import type { Hit } from "../../domain/retrieval/Hit.js";
@@ -49,32 +48,6 @@ export class Renderer {
 			seen.add(hit.location.filePath);
 			this.out(hit.location.filePath);
 		}
-	}
-
-	/** `label: qualifier, qualifier` — the default compact facet listing. */
-	facetLabels(view: FacetView): void {
-		view.labels.forEach((label, i) => {
-			const qualifiers = view.qualifiers?.[i] ?? [];
-			this.out(
-				qualifiers.length === 0
-					? `  ${label}`
-					: `  ${label}: ${qualifiers.join(", ")}`,
-			);
-		});
-	}
-
-	/**
-	 * Verbose listing: each cluster's alternative terms, then what separates it
-	 * from each sibling individually.
-	 */
-	facetDetail(view: FacetView): void {
-		view.labels.forEach((label, i) => {
-			const [head, ...rest] = view.candidates?.[i] ?? [label];
-			this.out(`  ${head}${rest.length > 0 ? ` (${rest.join(", ")})` : ""}`);
-			for (const row of view.disambiguators?.[i] ?? []) {
-				this.out(`    vs ${row.vs}: ${row.terms.join(", ")}`);
-			}
-		});
 	}
 
 	/** One research step, written to stderr so stdout stays pipeable. */

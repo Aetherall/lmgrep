@@ -1,18 +1,11 @@
 import type { Chunk } from "../corpus/Chunk.js";
 import type { ContentHash } from "../corpus/ContentHash.js";
-import type { Vector } from "../faceting/Vector.js";
-import type { Hit } from "../retrieval/Hit.js";
+import type { Vector } from "../corpus/Vector.js";
 import type { HitList } from "../retrieval/HitList.js";
 
 /** A chunk paired with the embedding to store alongside it. */
 export interface EmbeddedChunk {
 	chunk: Chunk;
-	vector: Vector;
-}
-
-/** A hit that carries its embedding, for client-side clustering. */
-export interface VectorHit {
-	hit: Hit;
 	vector: Vector;
 }
 
@@ -42,9 +35,6 @@ export interface ChunkText {
 export interface ChunkRepositoryPort {
 	add(chunks: EmbeddedChunk[]): Promise<void>;
 	search(query: ChunkQuery): Promise<HitList>;
-	/** Same as {@link search} but keeps embeddings, for faceting. */
-	searchWithVectors(query: ChunkQuery): Promise<VectorHit[]>;
-	findByIds(ids: string[]): Promise<VectorHit[]>;
 	deleteByFiles(filePaths: string[]): Promise<void>;
 	/** Of the given chunk hashes, those already stored. */
 	existingHashes(hashes: ContentHash[]): Promise<Set<string>>;

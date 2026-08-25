@@ -8,7 +8,6 @@ import { AiSdkEmbedder } from "../infrastructure/ai/AiSdkEmbedder.js";
 import { LocalModelReloader } from "../infrastructure/ai/LocalModelReloader.js";
 import { ConfigLoader } from "../infrastructure/fs/ConfigLoader.js";
 import { DatabaseLocks } from "../infrastructure/fs/DatabaseLocks.js";
-import { FacetSessionStore } from "../infrastructure/fs/FacetSessionStore.js";
 import { ConsoleLogger } from "../infrastructure/fs/Loggers.js";
 import { ProjectMetadataStore } from "../infrastructure/fs/ProjectMetadataStore.js";
 import { StateDirectory } from "../infrastructure/fs/StateDirectory.js";
@@ -18,14 +17,10 @@ import { ChunkRepository } from "../infrastructure/lancedb/ChunkRepository.js";
 import { FileManifestRepository } from "../infrastructure/lancedb/FileManifestRepository.js";
 import { IndexMaintenance } from "../infrastructure/lancedb/IndexMaintenance.js";
 import { LanceTables } from "../infrastructure/lancedb/LanceTables.js";
-import { VocabRepository } from "../infrastructure/lancedb/VocabRepository.js";
 import { TreeSitterChunker } from "../infrastructure/treesitter/TreeSitterChunker.js";
-import { FacetEngine } from "./faceting/FacetEngine.js";
-import { FacetNavigator } from "./faceting/FacetNavigator.js";
 import { BranchBootstrapper } from "./indexing/BranchBootstrapper.js";
 import { BranchManifestSweeper } from "./indexing/BranchManifestSweeper.js";
 import { IndexBuilder } from "./indexing/IndexBuilder.js";
-import { VocabularyBuilder } from "./indexing/VocabularyBuilder.js";
 import { Lmgrep, type LmgrepServices } from "./Lmgrep.js";
 import { RepairService } from "./operations/RepairService.js";
 import { StatusService } from "./operations/StatusService.js";
@@ -77,15 +72,12 @@ export class LmgrepFactory {
 		const tables = new LanceTables(location.path, location.branch);
 		const manifest = new FileManifestRepository(tables, location.branch);
 		const chunks = new ChunkRepository(tables, manifest, location.branch);
-		const vocab = new VocabRepository(tables);
 		const maintenance = new IndexMaintenance(tables, manifest);
 
 		const embedder = options.embedder ?? new AiSdkEmbedder(config);
 		const chunker = options.chunker ?? new TreeSitterChunker();
 		const workspace = new Workspace();
 		const reloader = new LocalModelReloader(config);
-
-		const vocabulary = new VocabularyBuilder(vocab, embedder, logger);
 
 		const sweeper = new BranchManifestSweeper(manifest, git, logger);
 
@@ -96,7 +88,6 @@ export class LmgrepFactory {
 			chunks,
 			manifest,
 			maintenance,
-			vocabulary,
 			bootstrapper: new BranchBootstrapper(manifest, git, logger),
 			sweeper,
 			logger,
@@ -131,15 +122,6 @@ export class LmgrepFactory {
 			() => metadata.read(location.path),
 		);
 
-		const facets = new FacetNavigator(
-			embedder,
-			chunks,
-			vocab,
-			new FacetEngine(vocab),
-			new FacetSessionStore(state),
-			() => locator.resolveProject(cwd).id,
-		);
-
 		const services: LmgrepServices = {
 			cwd,
 			config,
@@ -156,8 +138,6 @@ export class LmgrepFactory {
 			builder,
 			sweeper,
 			searcher,
-			facets,
-			vocabulary,
 			repairer: new RepairService(workspace, chunks, manifest, logger),
 			statusReporter: new StatusService(
 				chunks,
@@ -175,10 +155,6 @@ export class LmgrepFactory {
 				config,
 			),
 			projectId: () => locator.resolveProject(cwd).id,
-			vocabCount: () => vocab.count(),
-			dropVocab: () => vocab.drop(),
-			chunkCount: () => chunks.count(),
-			streamChunkTexts: () => chunks.streamTexts(),
 		};
 
 		return new Lmgrep(services);

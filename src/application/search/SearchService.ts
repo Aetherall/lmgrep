@@ -1,5 +1,5 @@
 import type { LmgrepConfig } from "../../domain/config/LmgrepConfig.js";
-import type { Vector } from "../../domain/faceting/Vector.js";
+import type { Vector } from "../../domain/corpus/Vector.js";
 import type { EmbedderPort } from "../../domain/ports/EmbedderPort.js";
 import type { LoggerPort } from "../../domain/ports/LoggerPort.js";
 import type { IndexMetadata } from "../../domain/project/IndexMetadata.js";

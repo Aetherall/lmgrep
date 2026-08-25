@@ -24,10 +24,7 @@ import { VectorIndexPolicy } from "./VectorIndexPolicy.js";
  */
 export class IndexMaintenance implements IndexMaintenancePort {
 	/** Tables holding embeddings, and therefore wanting a vector index. */
-	private static readonly VECTOR_TABLES = [
-		TableName.Chunks,
-		TableName.Vocab,
-	] as const;
+	private static readonly VECTOR_TABLES = [TableName.Chunks] as const;
 
 	constructor(
 		private readonly tables: LanceTables,
@@ -62,6 +59,7 @@ export class IndexMaintenance implements IndexMaintenancePort {
 	 */
 	async compact(): Promise<OptimizeReport> {
 		const report = await this.optimize({ force: true, create: true });
+		await this.dropLegacyTables(report);
 		const files = await this.tables.table(TableName.Files);
 		if (files) {
 			await files.optimize();
@@ -72,6 +70,26 @@ export class IndexMaintenance implements IndexMaintenancePort {
 			});
 		}
 		return report;
+	}
+
+	/**
+	 * Remove tables no longer part of the schema.
+	 *
+	 * Databases built before faceting was removed still carry a `vocab` table
+	 * holding one embedding per corpus term — nothing reads it now, and at
+	 * full embedding width that is real disk. Dropping it here means users
+	 * reclaim the space by running the command they already run.
+	 */
+	private async dropLegacyTables(report: OptimizeReport): Promise<void> {
+		const vocab = await this.tables.table(TableName.LegacyVocab);
+		if (!vocab) return;
+		const rows = await vocab.countRows();
+		await this.tables.dropTable(TableName.LegacyVocab);
+		report.tables.push({
+			table: TableName.LegacyVocab,
+			rows,
+			action: "dropped",
+		});
 	}
 
 	private async optimizeTable(
@@ -196,7 +214,11 @@ export class IndexMaintenance implements IndexMaintenancePort {
 	}
 
 	async reset(): Promise<void> {
-		for (const name of [TableName.Chunks, TableName.Files, TableName.Vocab]) {
+		for (const name of [
+			TableName.Chunks,
+			TableName.Files,
+			TableName.LegacyVocab,
+		]) {
 			await this.tables.dropTable(name);
 		}
 		this.manifest.invalidate();

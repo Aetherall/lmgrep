@@ -5,7 +5,7 @@ import {
 	embedMany,
 } from "ai";
 import type { LmgrepConfig } from "../../domain/config/LmgrepConfig.js";
-import { Vector } from "../../domain/faceting/Vector.js";
+import { Vector } from "../../domain/corpus/Vector.js";
 import type { EmbedderPort } from "../../domain/ports/EmbedderPort.js";
 import { ModelReference, ProviderRegistry } from "./ProviderRegistry.js";
 

@@ -6,11 +6,6 @@
  */
 
 export type {
-	FacetContents,
-	FacetOptions,
-	FacetView,
-} from "./application/faceting/FacetNavigator.js";
-export type {
 	IndexBuildOptions,
 	IndexBuildResult,
 	IndexingProgressEvent,
@@ -31,7 +26,7 @@ export { CodeLocation } from "./domain/corpus/CodeLocation.js";
 export { ContentHash } from "./domain/corpus/ContentHash.js";
 export { FileVersion } from "./domain/corpus/FileVersion.js";
 export { FileManifest, SourceFile } from "./domain/corpus/SourceFile.js";
-export { Vector } from "./domain/faceting/Vector.js";
+export { Vector } from "./domain/corpus/Vector.js";
 export type { ChunkerPort } from "./domain/ports/ChunkerPort.js";
 export type { EmbedderPort } from "./domain/ports/EmbedderPort.js";
 export type { LoggerPort } from "./domain/ports/LoggerPort.js";

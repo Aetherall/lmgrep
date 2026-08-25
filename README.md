@@ -70,7 +70,7 @@ lmgrep search "error handling" --file-prefix src/lib --language .ts
 | `lmgrep config` | Open the global config in your editor |
 | `lmgrep repair` | Detect and fix index inconsistencies |
 | `lmgrep migrate` | Rename existing index directories to match the current slug scheme |
-| `lmgrep compact` | Compact the index to reclaim disk space |
+| `lmgrep compact` | Reclaim disk, drop stale chunks, and build the vector index |
 | `lmgrep export` | Share this project's index with a peer via P2P |
 | `lmgrep import [source]` | Import from a peer (share code) or local database |
 | `lmgrep prune` | Delete the index for the current directory |
@@ -130,7 +130,7 @@ Config keys: `chatModel` (required for `ask`), `chatProvider` / `chatBaseURL` (d
 
 ## Targeting a database
 
-By default every command picks its database from the current directory, git-aware: one database per repo, scoped to the checked-out branch. `--database` overrides that and works on `index`, `search`, `ask`, `facet`, `status`, `repair`, `serve`, `mcp`, `compact`, and `prune`.
+By default every command picks its database from the current directory, git-aware: one database per repo, scoped to the checked-out branch. `--database` overrides that and works on `index`, `search`, `ask`, `status`, `repair`, `serve`, `mcp`, `compact`, and `prune`.
 
 ```sh
 # A bare name — an independent index under ~/.local/state/lmgrep/<name>

@@ -2,13 +2,12 @@ import { Chunk } from "../../domain/corpus/Chunk.js";
 import { CodeLocation } from "../../domain/corpus/CodeLocation.js";
 import { ContentHash } from "../../domain/corpus/ContentHash.js";
 import { FileVersion } from "../../domain/corpus/FileVersion.js";
-import { Vector } from "../../domain/faceting/Vector.js";
+import type { Vector } from "../../domain/corpus/Vector.js";
 import type {
 	ChunkQuery,
 	ChunkRepositoryPort,
 	ChunkText,
 	EmbeddedChunk,
-	VectorHit,
 } from "../../domain/ports/ChunkRepositoryPort.js";
 import type { FileManifestRepositoryPort } from "../../domain/ports/FileManifestRepositoryPort.js";
 import type { Branch } from "../../domain/project/Branch.js";
@@ -92,71 +91,6 @@ export class ChunkRepository implements ChunkRepositoryPort {
 		}
 
 		return hits.deduplicated().takeAtMost(query.limit);
-	}
-
-	async searchWithVectors(query: ChunkQuery): Promise<VectorHit[]> {
-		const table = await this.tables.table(TableName.Chunks);
-		if (!table) {
-			throw new Error("No index found. Run `lmgrep index` first.");
-		}
-
-		const versions = query.scopeToBranch
-			? await this.manifest.branchVersions()
-			: undefined;
-		const fetchLimit = versions ? query.limit * 3 : query.limit * 2;
-
-		let builder = table
-			.query()
-			.nearestTo(query.vector.toArray())
-			.limit(fetchLimit)
-			.refineFactor(VectorIndexPolicy.REFINE_FACTOR)
-			// Unlike search(), the caller clusters on the embeddings, so the
-			// vector column stays in the projection.
-			.select([...SEARCH_COLUMNS, "vector"]);
-
-		if (query.filePrefix) {
-			builder = builder.where(
-				`filePath LIKE '${LanceTables.quote(query.filePrefix)}%'`,
-			);
-		}
-
-		const rows = await builder.toArray();
-		let hits = HitList.of(rows.map((r) => this.toHit(r)));
-		if (versions) {
-			hits = hits.filtered((h) =>
-				h.fileVersion.matches(versions.versionOf(h.location.filePath)),
-			);
-		}
-		const kept = hits.deduplicated().takeAtMost(query.limit);
-
-		const vectorById = new Map<string, number[]>(
-			rows.map((r) => [
-				r.id as string,
-				Array.from(r.vector as Iterable<number>),
-			]),
-		);
-		return kept.toArray().map((hit) => ({
-			hit,
-			vector: Vector.from(vectorById.get(hit.id) ?? []),
-		}));
-	}
-
-	async findByIds(ids: string[]): Promise<VectorHit[]> {
-		if (ids.length === 0) return [];
-		const table = await this.tables.table(TableName.Chunks);
-		if (!table) return [];
-
-		const rows = await table
-			.query()
-			.where(LanceTables.inFilter("id", ids))
-			.toArray();
-
-		return rows.map((r) => ({
-			// These are pooled hits being rehydrated, not fresh retrieval, so
-			// there is no meaningful distance to report.
-			hit: this.toHit({ ...r, _distance: undefined }),
-			vector: Vector.from(Array.from(r.vector as Iterable<number>)),
-		}));
 	}
 
 	/**
