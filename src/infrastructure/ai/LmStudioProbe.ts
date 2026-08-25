@@ -20,14 +20,16 @@ export class LmStudioProbe implements RuntimeProbe {
 	private static readonly TIMEOUT_MS = 3000;
 
 	async detect(): Promise<DetectedRuntime | undefined> {
-		let payload: { data?: Array<{ id: string; type?: string }> };
+		let payload: {
+			data?: Array<{ id: string; type?: string; state?: string }>;
+		};
 		try {
 			const res = await fetch(LmStudioProbe.CATALOG_URL, {
 				signal: AbortSignal.timeout(LmStudioProbe.TIMEOUT_MS),
 			});
 			if (!res.ok) return undefined;
 			payload = (await res.json()) as {
-				data?: Array<{ id: string; type?: string }>;
+				data?: Array<{ id: string; type?: string; state?: string }>;
 			};
 		} catch {
 			return undefined;
@@ -36,6 +38,7 @@ export class LmStudioProbe implements RuntimeProbe {
 		const models: CatalogedModel[] = (payload.data ?? []).map((m) => ({
 			id: m.id,
 			kind: LmStudioProbe.kindOf(m.type),
+			loaded: m.state === "loaded",
 		}));
 
 		return {

@@ -37,9 +37,26 @@ export class LocalRuntimeDetector {
 		);
 	}
 
-	/** Models the runtime says are embedders, best candidates first. */
+	/**
+	 * Models the runtime says are embedders, best candidate first.
+	 *
+	 * A loaded model sorts ahead of the rest. Runtimes list models in an order
+	 * of their own — LM Studio appears to use recency — and picking by position
+	 * means the choice silently changes depending on what was used last.
+	 * Load state is an explicit signal instead of an incidental one.
+	 */
 	static embeddingModels(runtime: DetectedRuntime): CatalogedModel[] {
-		return runtime.models.filter((m) => m.kind === "embedding");
+		return LocalRuntimeDetector.loadedFirst(
+			runtime.models.filter((m) => m.kind === "embedding"),
+		);
+	}
+
+	/** Stable sort putting loaded models first, order otherwise preserved. */
+	private static loadedFirst(models: CatalogedModel[]): CatalogedModel[] {
+		return [
+			...models.filter((m) => m.loaded),
+			...models.filter((m) => !m.loaded),
+		];
 	}
 
 	/**
@@ -47,7 +64,9 @@ export class LocalRuntimeDetector {
 	 * an embedder is a chat model produces a confusing failure at answer time.
 	 */
 	static chatModels(runtime: DetectedRuntime): CatalogedModel[] {
-		return runtime.models.filter((m) => m.kind === "chat");
+		return LocalRuntimeDetector.loadedFirst(
+			runtime.models.filter((m) => m.kind === "chat"),
+		);
 	}
 
 	/**
@@ -55,6 +74,8 @@ export class LocalRuntimeDetector {
 	 * recognizable as an embedder.
 	 */
 	static untypedModels(runtime: DetectedRuntime): CatalogedModel[] {
-		return runtime.models.filter((m) => m.kind === "unknown");
+		return LocalRuntimeDetector.loadedFirst(
+			runtime.models.filter((m) => m.kind === "unknown"),
+		);
 	}
 }

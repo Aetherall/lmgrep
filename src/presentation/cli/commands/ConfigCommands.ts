@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Command } from "commander";
+import type { LmgrepConfig } from "../../../domain/config/LmgrepConfig.js";
 import { ModelIdentity } from "../../../domain/project/ModelIdentity.js";
 import { ProjectLocator } from "../../../domain/project/ProjectLocator.js";
 import { EmbeddingPrefixes } from "../../../infrastructure/ai/EmbeddingPrefixes.js";
@@ -62,6 +63,9 @@ export class ConfigCommands {
 			return;
 		}
 
+		// The config already at this path is an explicit prior choice; an index
+		// built from it is a harder constraint still.
+		const previous = loader.readFile(configPath);
 		const existing = this.existingIndexMetadata(cwd);
 		const indexFamily = existing?.model
 			? ModelIdentity.of(existing.model).family
@@ -76,8 +80,13 @@ export class ConfigCommands {
 		}
 
 		renderer.line(`Found ${runtime.label}.`);
-		const model = this.selectEmbeddingModel(runtime, existing, indexFamily);
-		const chatModel = model ? this.selectChatModel(runtime) : undefined;
+		const model =
+			this.keepConfiguredModel(runtime, previous) ??
+			this.selectEmbeddingModel(runtime, existing, indexFamily);
+		const chatModel = model
+			? (this.keepConfiguredChatModel(runtime, previous) ??
+				this.selectChatModel(runtime))
+			: undefined;
 
 		this.write(
 			configPath,
@@ -87,10 +96,84 @@ export class ConfigCommands {
 				providerPackage: model ? runtime.providerPackage : undefined,
 				local: model ? true : undefined,
 				chatModel: chatModel ? `${runtime.providerId}:${chatModel}` : undefined,
-				prefixes: model ? EmbeddingPrefixes.forModel(model) : undefined,
+				prefixes: this.prefixesFor(model, previous),
+				// Carried through rather than regenerated: this is tuning the
+				// user chose, and init has no better answer than they did.
+				batchSize: previous?.batchSize,
+				maxTokens: previous?.maxTokens,
+				dimensions: previous?.dimensions,
 			}),
 		);
 		renderer.line(`Wrote ${configPath}`);
+	}
+
+	/**
+	 * Keep the model the config already names, when the runtime still offers it.
+	 *
+	 * Detection reads whatever the server lists first or happens to have
+	 * loaded, and both move — LM Studio reorders by recency and unloads when
+	 * idle. A model written in the config is a decision; re-deriving one from
+	 * volatile state would silently swap it, and re-indexing under a different
+	 * model is not a small mistake.
+	 */
+	private keepConfiguredModel(
+		runtime: DetectedRuntime,
+		previous: Partial<LmgrepConfig> | undefined,
+	): string | undefined {
+		const configured = previous?.model;
+		if (!configured) return undefined;
+
+		const reference = ModelIdentity.of(configured);
+		if (reference.provider !== runtime.providerId) return undefined;
+
+		const available = runtime.models.some((m) => m.id === reference.family);
+		if (!available) {
+			this.context.renderer.line(
+				`Configured model "${reference.family}" is no longer available in ${runtime.label}.`,
+			);
+			return undefined;
+		}
+
+		this.context.renderer.line(
+			`Keeping configured embedding model: ${reference.family}`,
+		);
+		return reference.family;
+	}
+
+	/** Same reasoning as {@link keepConfiguredModel}, for `ask`. */
+	private keepConfiguredChatModel(
+		runtime: DetectedRuntime,
+		previous: Partial<LmgrepConfig> | undefined,
+	): string | undefined {
+		const configured = previous?.chatModel;
+		if (!configured) return undefined;
+		const reference = ModelIdentity.of(configured);
+		if (reference.provider !== runtime.providerId) return undefined;
+		if (!runtime.models.some((m) => m.id === reference.family)) {
+			return undefined;
+		}
+		this.context.renderer.line(
+			`Keeping configured chat model: ${reference.family}`,
+		);
+		return reference.family;
+	}
+
+	/**
+	 * Prefixes to write: the ones already configured win, since they may be
+	 * hand-tuned for a model this table knows nothing about, and an empty
+	 * document prefix is a deliberate setting rather than an absent one.
+	 */
+	private prefixesFor(
+		model: string | undefined,
+		previous: Partial<LmgrepConfig> | undefined,
+	): { query: string; document: string; family?: string } | undefined {
+		if (previous?.queryPrefix !== undefined) {
+			return {
+				query: previous.queryPrefix,
+				document: previous.documentPrefix ?? "",
+			};
+		}
+		return model ? EmbeddingPrefixes.forModel(model) : undefined;
 	}
 
 	/**
@@ -143,12 +226,15 @@ export class ConfigCommands {
 			return undefined;
 		}
 
-		renderer.line(`Using embedding model: ${picked.id}`);
+		renderer.line(
+			`Using embedding model: ${picked.id}${picked.loaded ? " (loaded)" : ""}`,
+		);
 		if (picked.kind !== "embedding") {
 			renderer.line(
 				"  (this model's type could not be confirmed — check it is an embedder)",
 			);
 		}
+		this.reportAlternatives(candidates, picked.id);
 		const prefixes = EmbeddingPrefixes.forModel(picked.id);
 		if (prefixes) {
 			renderer.line(
@@ -165,8 +251,30 @@ export class ConfigCommands {
 	private selectChatModel(runtime: DetectedRuntime): string | undefined {
 		const [picked] = LocalRuntimeDetector.chatModels(runtime);
 		if (!picked) return undefined;
-		this.context.renderer.line(`Using chat model for \`ask\`: ${picked.id}`);
+		this.context.renderer.line(
+			`Using chat model for \`ask\`: ${picked.id}${picked.loaded ? " (loaded)" : ""}`,
+		);
 		return picked.id;
+	}
+
+	/**
+	 * Name the models not chosen.
+	 *
+	 * The pick is a guess whenever nothing is loaded, and switching means
+	 * editing one config line — but only if the user knows what else was
+	 * there. Silently choosing one of five is how you end up indexing a whole
+	 * repository with the wrong model.
+	 */
+	private reportAlternatives(
+		candidates: readonly { id: string }[],
+		chosen: string,
+	): void {
+		const others = candidates.filter((m) => m.id !== chosen);
+		if (others.length === 0) return;
+		this.context.renderer.line(
+			`  Also available: ${others.map((m) => m.id).join(", ")}`,
+		);
+		this.context.renderer.line("  Change `model` in the config to switch.");
 	}
 
 	private existingIndexMetadata(cwd: string) {

@@ -5,7 +5,11 @@ export interface DetectedSettings {
 	providerPackage?: string;
 	local?: boolean;
 	chatModel?: string;
-	prefixes?: { query: string; document: string; family: string };
+	prefixes?: { query: string; document: string; family?: string };
+	/** Deliberate tuning from an existing config, carried through untouched. */
+	batchSize?: number;
+	maxTokens?: number;
+	dimensions?: number;
 }
 
 /**
@@ -32,9 +36,11 @@ export class ConfigTemplate {
 		// are written out rather than left commented.
 		const prefixLines = detected?.prefixes
 			? [
-					`# ${detected.prefixes.family} models are asymmetric — these prefixes are required.`,
-					`queryPrefix: "${detected.prefixes.query}"`,
-					`documentPrefix: "${detected.prefixes.document}"`,
+					detected.prefixes.family
+						? `# ${detected.prefixes.family} models are asymmetric — these prefixes are required.`
+						: "# Prefixes required by this model.",
+					`queryPrefix: ${JSON.stringify(detected.prefixes.query)}`,
+					`documentPrefix: ${JSON.stringify(detected.prefixes.document)}`,
 				].join("\n")
 			: [
 					'# queryPrefix: "search_query: "',
@@ -65,7 +71,7 @@ ${providerLine}
 ${localLine}
 
 # Batch size for embedding API calls
-batchSize: 100
+batchSize: ${detected?.batchSize ?? 100}
 
 ${prefixLines}
 
@@ -73,10 +79,10 @@ ${prefixLines}
 ${chatLine}
 
 # Optional: embedding dimensions (if model supports it)
-# dimensions: 384
+${detected?.dimensions ? `dimensions: ${detected.dimensions}` : "# dimensions: 384"}
 
 # Optional: max tokens per chunk (estimated at 4 chars/token)
-# maxTokens: 8192
+${detected?.maxTokens ? `maxTokens: ${detected.maxTokens}` : "# maxTokens: 8192"}
 
 # Optional: additional ignore patterns (merged with .gitignore)
 # ignore:

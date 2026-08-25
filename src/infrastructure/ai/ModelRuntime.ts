@@ -4,6 +4,14 @@ export type ModelKind = "embedding" | "chat" | "unknown";
 export interface CatalogedModel {
 	id: string;
 	kind: ModelKind;
+	/**
+	 * Currently loaded in the runtime.
+	 *
+	 * The strongest statement of intent available without asking: a model the
+	 * user has deliberately loaded is the one they mean. Undefined when the
+	 * runtime does not report load state.
+	 */
+	loaded?: boolean;
 }
 
 /** A local inference server that was found listening. */

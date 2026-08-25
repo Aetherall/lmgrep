@@ -107,6 +107,17 @@ export class ConfigLoader {
 		return undefined;
 	}
 
+	/**
+	 * Parse a single config file, ignoring the layering.
+	 *
+	 * `init` rewrites one specific file, so it needs that file's own contents
+	 * — merging layers here would copy a project's overrides into the global
+	 * config.
+	 */
+	readFile(path: string): Partial<LmgrepConfig> | undefined {
+		return this.tryLoadFile(path);
+	}
+
 	private tryLoadFile(path: string): Partial<LmgrepConfig> | undefined {
 		if (!existsSync(path)) return undefined;
 		const parsed = parse(readFileSync(path, "utf-8"));

@@ -13,6 +13,8 @@ import type {
  */
 export class OllamaProbe implements RuntimeProbe {
 	private static readonly TAGS_URL = "http://localhost:11434/api/tags";
+	/** Models currently resident in memory. */
+	private static readonly RUNNING_URL = "http://localhost:11434/api/ps";
 	static readonly BASE_URL = "http://localhost:11434/v1";
 	private static readonly TIMEOUT_MS = 3000;
 
@@ -38,9 +40,11 @@ export class OllamaProbe implements RuntimeProbe {
 			return undefined;
 		}
 
+		const loaded = await this.loadedModelNames();
 		const models: CatalogedModel[] = (payload.models ?? []).map((m) => ({
 			id: m.name,
 			kind: OllamaProbe.looksLikeEmbedding(m.name) ? "embedding" : "unknown",
+			loaded: loaded.has(m.name),
 		}));
 
 		return {
@@ -49,6 +53,22 @@ export class OllamaProbe implements RuntimeProbe {
 			baseURL: OllamaProbe.BASE_URL,
 			models,
 		};
+	}
+
+	/** Best-effort; an older Ollama without this endpoint just reports none. */
+	private async loadedModelNames(): Promise<Set<string>> {
+		try {
+			const res = await fetch(OllamaProbe.RUNNING_URL, {
+				signal: AbortSignal.timeout(OllamaProbe.TIMEOUT_MS),
+			});
+			if (!res.ok) return new Set();
+			const payload = (await res.json()) as {
+				models?: Array<{ name: string }>;
+			};
+			return new Set((payload.models ?? []).map((m) => m.name));
+		} catch {
+			return new Set();
+		}
 	}
 
 	private static looksLikeEmbedding(name: string): boolean {
