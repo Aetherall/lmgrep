@@ -1,5 +1,5 @@
+import type { IndexMetadata } from "../../domain/project/IndexMetadata.js";
 import { ModelIdentity } from "../../domain/project/ModelIdentity.js";
-import type { ProjectMetadata } from "../fs/ProjectMetadataStore.js";
 import type { RowReplication } from "../lancedb/RowReplication.js";
 import { PeerSwarm } from "./PeerSwarm.js";
 import {
@@ -48,7 +48,7 @@ export class IndexShare {
 	 * a peer has taken the whole transfer.
 	 */
 	async send(
-		metadata: ProjectMetadata | undefined,
+		metadata: IndexMetadata | undefined,
 		options: ShareProgress = {},
 	): Promise<{ code: string; done: Promise<void> }> {
 		const swarm = await PeerSwarm.create();
@@ -114,7 +114,7 @@ export class IndexShare {
 	/** Connect to a sharer and write everything it sends into this database. */
 	async receive(
 		code: ShareCode,
-		localMetadata: ProjectMetadata | undefined,
+		localMetadata: IndexMetadata | undefined,
 		options: ReceiveOptions = {},
 	): Promise<ReceiveResult> {
 		const swarm = await PeerSwarm.create();
@@ -195,7 +195,7 @@ export class IndexShare {
 	}
 
 	private warnOnModelMismatch(
-		local: ProjectMetadata | undefined,
+		local: IndexMetadata | undefined,
 		remote: { model?: string; dimensions?: number },
 		onWarning?: (message: string) => void,
 	): void {

@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { StateDirectoryPort } from "../../domain/ports/StateDirectoryPort.js";
+import type { DiscoveredIndex } from "../../domain/project/IndexMetadata.js";
 import { ProjectId } from "../../domain/project/ProjectId.js";
-import type { DiscoveredProject } from "../../infrastructure/fs/ProjectMetadataStore.js";
 
 /** One index directory that should move, and whether it can. */
 export interface PlannedMove {
@@ -27,7 +27,7 @@ export interface PlannedMove {
 export class IndexMigrationPlan {
 	constructor(private readonly state: StateDirectoryPort) {}
 
-	plan(projects: readonly DiscoveredProject[]): PlannedMove[] {
+	plan(projects: readonly DiscoveredIndex[]): PlannedMove[] {
 		const base = this.state.root();
 		const moves: PlannedMove[] = [];
 

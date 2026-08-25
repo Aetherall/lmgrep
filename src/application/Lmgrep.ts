@@ -3,20 +3,20 @@ import type { LmgrepConfig } from "../domain/config/LmgrepConfig.js";
 import type { FileManifest } from "../domain/corpus/SourceFile.js";
 import type { ChunkerPort } from "../domain/ports/ChunkerPort.js";
 import type { ChunkRepositoryPort } from "../domain/ports/ChunkRepositoryPort.js";
+import type { DatabaseSessionPort } from "../domain/ports/DatabaseSessionPort.js";
 import type { EmbedderPort } from "../domain/ports/EmbedderPort.js";
 import type { FileManifestRepositoryPort } from "../domain/ports/FileManifestRepositoryPort.js";
 import type {
 	IndexMaintenancePort,
 	OptimizeReport,
 } from "../domain/ports/IndexMaintenancePort.js";
+import type { IndexMetadataPort } from "../domain/ports/IndexMetadataPort.js";
 import type { LoggerPort } from "../domain/ports/LoggerPort.js";
 import type { DatabaseLocation } from "../domain/project/DatabaseLocation.js";
 import type { ProjectId } from "../domain/project/ProjectId.js";
 import type { ProjectLocator } from "../domain/project/ProjectLocator.js";
 import type { TraceEntry } from "../domain/research/ResearchTrace.js";
 import type { HitList } from "../domain/retrieval/HitList.js";
-import type { ProjectMetadataStore } from "../infrastructure/fs/ProjectMetadataStore.js";
-import type { LanceTables } from "../infrastructure/lancedb/LanceTables.js";
 import type {
 	FacetContents,
 	FacetNavigator,
@@ -50,11 +50,11 @@ export interface LmgrepServices {
 	location: DatabaseLocation;
 	locator: ProjectLocator;
 	logger: LoggerPort;
-	tables: LanceTables;
+	tables: DatabaseSessionPort;
 	chunks: ChunkRepositoryPort;
 	manifest: FileManifestRepositoryPort;
 	maintenance: IndexMaintenancePort;
-	metadata: ProjectMetadataStore;
+	metadata: IndexMetadataPort;
 	embedder: EmbedderPort;
 	chunker: ChunkerPort;
 	builder: IndexBuilder;

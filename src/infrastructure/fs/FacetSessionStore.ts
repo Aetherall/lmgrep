@@ -12,6 +12,7 @@ import {
 	FacetSession,
 	type FacetSessionState,
 } from "../../domain/faceting/FacetSession.js";
+import type { SessionStorePort } from "../../domain/ports/SessionStorePort.js";
 import type { StateDirectoryPort } from "../../domain/ports/StateDirectoryPort.js";
 import type { ProjectId } from "../../domain/project/ProjectId.js";
 
@@ -21,7 +22,7 @@ import type { ProjectId } from "../../domain/project/ProjectId.js";
  * Sessions are disposable navigation state, not data: they are pruned by age
  * and count on every write, so an abandoned exploration cannot accumulate.
  */
-export class FacetSessionStore {
+export class FacetSessionStore implements SessionStorePort {
 	private static readonly SUBDIR = "facet-sessions";
 	/** Max sessions per project before the oldest are evicted on write. */
 	private static readonly MAX_SESSIONS = 50;

@@ -2,9 +2,9 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Command } from "commander";
 import type { Branch } from "../../../domain/project/Branch.js";
+import type { IndexMetadata } from "../../../domain/project/IndexMetadata.js";
 import { ModelIdentity } from "../../../domain/project/ModelIdentity.js";
 import { ProjectLocator } from "../../../domain/project/ProjectLocator.js";
-import type { ProjectMetadata } from "../../../infrastructure/fs/ProjectMetadataStore.js";
 import { ProjectMetadataStore } from "../../../infrastructure/fs/ProjectMetadataStore.js";
 import { StateDirectory } from "../../../infrastructure/fs/StateDirectory.js";
 import { GitClient } from "../../../infrastructure/git/GitClient.js";
@@ -20,7 +20,7 @@ interface ShareTarget {
 	locator: ProjectLocator;
 	branch: Branch;
 	location: string;
-	metadata: ProjectMetadata | undefined;
+	metadata: IndexMetadata | undefined;
 	store: ProjectMetadataStore;
 }
 

@@ -2,9 +2,9 @@ import type { LmgrepConfig } from "../../domain/config/LmgrepConfig.js";
 import type { Vector } from "../../domain/faceting/Vector.js";
 import type { EmbedderPort } from "../../domain/ports/EmbedderPort.js";
 import type { LoggerPort } from "../../domain/ports/LoggerPort.js";
+import type { IndexMetadata } from "../../domain/project/IndexMetadata.js";
 import { ModelIdentity } from "../../domain/project/ModelIdentity.js";
 import { HitList } from "../../domain/retrieval/HitList.js";
-import type { ProjectMetadata } from "../../infrastructure/fs/ProjectMetadataStore.js";
 import type { SearchCriteria } from "./SearchCriteria.js";
 import type {
 	SearchTarget,
@@ -28,7 +28,7 @@ export class SearchService {
 		private readonly targets: SearchTargetResolver,
 		private readonly config: LmgrepConfig,
 		private readonly logger: LoggerPort,
-		private readonly readMetadata: () => ProjectMetadata | undefined,
+		private readonly readMetadata: () => IndexMetadata | undefined,
 	) {}
 
 	async search(query: string, criteria: SearchCriteria): Promise<HitList> {

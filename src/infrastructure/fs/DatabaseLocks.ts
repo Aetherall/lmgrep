@@ -1,3 +1,4 @@
+import type { LockPort } from "../../domain/ports/LockPort.js";
 import { PidFileLock } from "./PidFileLock.js";
 
 /**
@@ -14,7 +15,7 @@ import { PidFileLock } from "./PidFileLock.js";
  * `.write.lock` so it does not match the `.lock` suffix scan used to discover
  * running processes.
  */
-export class DatabaseLocks {
+export class DatabaseLocks implements LockPort {
 	private static readonly DEFAULT_WAIT_MS = 120_000;
 	private static readonly DEFAULT_POLL_MS = 200;
 

@@ -25,6 +25,10 @@ export class ResearchPrompts {
 		"- If the results do not answer the question, say so plainly and list what's missing. Never invent file paths, line numbers, or behavior.",
 	].join("\n");
 
+	/** How the one available tool is described to the model. */
+	static readonly SEARCH_TOOL =
+		"Semantic code search. Returns the top matching code units, each with a [n] id, file:line, and its source. This is the only tool — answer from what it returns.";
+
 	static readonly FORCE_ANSWER =
 		"Using ONLY the evidence above, write the final answer now. Cite [n] for every claim, reusing the ids shown. If the evidence is insufficient, say so plainly and list what is still missing. Do not ask to search further.";
 

@@ -37,6 +37,10 @@ export type { EmbedderPort } from "./domain/ports/EmbedderPort.js";
 export type { LoggerPort } from "./domain/ports/LoggerPort.js";
 export { Branch } from "./domain/project/Branch.js";
 export { DatabaseLocation } from "./domain/project/DatabaseLocation.js";
+export type {
+	DiscoveredIndex,
+	IndexMetadata,
+} from "./domain/project/IndexMetadata.js";
 export { ModelIdentity } from "./domain/project/ModelIdentity.js";
 export { Project } from "./domain/project/Project.js";
 export { ProjectId } from "./domain/project/ProjectId.js";
@@ -47,10 +51,7 @@ export { HitList } from "./domain/retrieval/HitList.js";
 export { AiSdkEmbedder } from "./infrastructure/ai/AiSdkEmbedder.js";
 export { ConfigLoader } from "./infrastructure/fs/ConfigLoader.js";
 export { ConsoleLogger, SilentLogger } from "./infrastructure/fs/Loggers.js";
-export {
-	type ProjectMetadata,
-	ProjectMetadataStore,
-} from "./infrastructure/fs/ProjectMetadataStore.js";
+export { ProjectMetadataStore } from "./infrastructure/fs/ProjectMetadataStore.js";
 export { StateDirectory } from "./infrastructure/fs/StateDirectory.js";
 export { IndexShare } from "./infrastructure/p2p/IndexShare.js";
 export { ShareCode } from "./infrastructure/p2p/ShareCode.js";

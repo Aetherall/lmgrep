@@ -1,25 +1,12 @@
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { IndexMetadataPort } from "../../domain/ports/IndexMetadataPort.js";
 import type { StateDirectoryPort } from "../../domain/ports/StateDirectoryPort.js";
+import type {
+	DiscoveredIndex,
+	IndexMetadata,
+} from "../../domain/project/IndexMetadata.js";
 import { TableName } from "../lancedb/LanceTables.js";
-
-/** The sidecar record describing what an index contains and how it was built. */
-export interface ProjectMetadata {
-	root: string;
-	remote?: string;
-	branch: string;
-	indexedAt: string;
-	/** Full model string used at index time (e.g. "openai:nomic-embed-text"). */
-	model?: string;
-	/** Embedding vector dimensions. */
-	dimensions?: number;
-}
-
-/** An index directory paired with the metadata found inside it. */
-export interface DiscoveredProject {
-	databasePath: string;
-	metadata: ProjectMetadata;
-}
 
 /**
  * The `lmgrep.json` sidecar written beside each database.
@@ -28,16 +15,16 @@ export interface DiscoveredProject {
  * lets a later search refuse to run against incompatible embeddings instead of
  * silently returning nonsense.
  */
-export class ProjectMetadataStore {
+export class ProjectMetadataStore implements IndexMetadataPort {
 	private static readonly FILE = "lmgrep.json";
 
 	constructor(private readonly state: StateDirectoryPort) {}
 
-	read(databasePath: string): ProjectMetadata | undefined {
+	read(databasePath: string): IndexMetadata | undefined {
 		try {
 			return JSON.parse(
 				readFileSync(join(databasePath, ProjectMetadataStore.FILE), "utf-8"),
-			) as ProjectMetadata;
+			) as IndexMetadata;
 		} catch {
 			return undefined;
 		}
@@ -52,11 +39,11 @@ export class ProjectMetadataStore {
 	 */
 	write(
 		databasePath: string,
-		metadata: Omit<ProjectMetadata, "indexedAt">,
+		metadata: Omit<IndexMetadata, "indexedAt">,
 	): void {
 		mkdirSync(databasePath, { recursive: true });
 		const existing = this.read(databasePath);
-		const merged: ProjectMetadata = {
+		const merged: IndexMetadata = {
 			root: metadata.root,
 			remote: metadata.remote,
 			branch: metadata.branch,
@@ -99,8 +86,8 @@ export class ProjectMetadataStore {
 	}
 
 	/** Every index in the state directory that carries readable metadata. */
-	discoverAll(): DiscoveredProject[] {
-		const out: DiscoveredProject[] = [];
+	discoverAll(): DiscoveredIndex[] {
+		const out: DiscoveredIndex[] = [];
 		for (const databasePath of this.state.listDatabaseDirectories()) {
 			const metadata = this.read(databasePath);
 			if (metadata) out.push({ databasePath, metadata });

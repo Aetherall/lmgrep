@@ -1,6 +1,8 @@
-import { generateText, stepCountIs, tool } from "ai";
-import { z } from "zod";
 import type { LmgrepConfig } from "../../domain/config/LmgrepConfig.js";
+import type {
+	ChatModelPort,
+	SearchToolCall,
+} from "../../domain/ports/ChatModelPort.js";
 import {
 	CitationMarkers,
 	type Source,
@@ -11,8 +13,6 @@ import {
 	type TraceEntry,
 } from "../../domain/research/ResearchTrace.js";
 import type { HitList } from "../../domain/retrieval/HitList.js";
-import type { AiSdkChatModel } from "../../infrastructure/ai/AiSdkChatModel.js";
-import { ProviderFailure } from "../../infrastructure/ai/ProviderFailure.js";
 import {
 	SearchCriteria,
 	type SearchOptions,
@@ -69,7 +69,7 @@ export class ResearchAgent {
 
 	constructor(
 		private readonly searcher: ResearchSearcher,
-		private readonly chat: AiSdkChatModel,
+		private readonly chat: ChatModelPort,
 		private readonly config: LmgrepConfig,
 	) {}
 
@@ -92,91 +92,63 @@ export class ResearchAgent {
 		const maxSteps =
 			this.config.chatMaxSteps ?? ResearchAgent.DEFAULT_MAX_STEPS;
 
-		const model = await this.chat.resolve();
 		let searchCount = 0;
-		let steps = 0;
-		let answer = "";
 
-		const searchTool = tool({
-			description:
-				"Semantic code search. Returns the top matching code units, each with a [n] id, file:line, and its source. This is the only tool — answer from what it returns.",
-			inputSchema: z.object({
-				query: z
-					.string()
-					.describe("Natural-language intent, phrased as a question."),
-				filePrefix: z
-					.string()
-					.optional()
-					.describe("Restrict to files under this path prefix."),
-				type: z
-					.array(z.string())
-					.optional()
-					.describe("Filter by AST node type (e.g. ['function_declaration'])."),
-				language: z
-					.array(z.string())
-					.optional()
-					.describe("Filter by file extension (e.g. ['.ts'])."),
-				limit: z.number().optional().describe("Max hits (default 5)."),
-			}),
-			execute: async ({ query, filePrefix, type, language, limit }) => {
-				if (searchCount >= ResearchAgent.MAX_SEARCHES) {
-					return ResearchPrompts.BUDGET_EXHAUSTED;
-				}
-				searchCount++;
+		const runSearch = async (call: SearchToolCall): Promise<string> => {
+			if (searchCount >= ResearchAgent.MAX_SEARCHES) {
+				return ResearchPrompts.BUDGET_EXHAUSTED;
+			}
+			searchCount++;
 
-				const hits = await this.runSearch(query, {
-					limit: Math.min(
-						limit ?? ResearchAgent.DEFAULT_SEARCH_LIMIT,
-						ResearchAgent.MAX_SEARCH_LIMIT,
-					),
-					filePrefix,
-					type,
-					language,
-				});
-				trace.searched(query, hits.length);
+			const hits = await this.runSearch(call.query, {
+				limit: Math.min(
+					call.limit ?? ResearchAgent.DEFAULT_SEARCH_LIMIT,
+					ResearchAgent.MAX_SEARCH_LIMIT,
+				),
+				filePrefix: call.filePrefix,
+				type: call.type,
+				language: call.language,
+			});
+			trace.searched(call.query, hits.length);
 
-				if (hits.isEmpty) {
-					return `No results for "${query}". Try different wording or a broader query.`;
-				}
+			if (hits.isEmpty) {
+				return `No results for "${call.query}". Try different wording or a broader query.`;
+			}
 
-				const blocks = ledger
-					.ingest(hits.toArray())
-					.map(
-						({ id, hit, body }) =>
-							`[${id}] ${hit.location} · ${hit.type} ${hit.name} · score ${hit.score.toFixed(2)}\n${body}`,
-					);
-				const parts = [`Results for "${query}":`, ...blocks];
-				if (searchCount >= ResearchAgent.NUDGE_AFTER) {
-					parts.push(ResearchPrompts.WRAP_UP);
-				}
-				return parts.join("\n\n");
-			},
+			const blocks = ledger
+				.ingest(hits.toArray())
+				.map(
+					({ id, hit, body }) =>
+						`[${id}] ${hit.location} · ${hit.type} ${hit.name} · score ${hit.score.toFixed(2)}\n${body}`,
+				);
+			const parts = [`Results for "${call.query}":`, ...blocks];
+			if (searchCount >= ResearchAgent.NUDGE_AFTER) {
+				parts.push(ResearchPrompts.WRAP_UP);
+			}
+			return parts.join("\n\n");
+		};
+
+		const outcome = await this.chat.runToolLoop({
+			system: ResearchPrompts.SYSTEM,
+			prompt: question,
+			maxSteps,
+			timeoutMs,
+			toolDescription: ResearchPrompts.SEARCH_TOOL,
+			onSearch: runSearch,
 		});
 
-		try {
-			const result = await generateText({
-				model,
-				system: ResearchPrompts.SYSTEM,
-				prompt: question,
-				tools: { search: searchTool },
-				stopWhen: stepCountIs(maxSteps),
-				temperature: 0,
-				abortSignal: AbortSignal.timeout(timeoutMs),
-				onStepFinish: () => {
-					steps++;
-				},
-			});
-			answer = result.text.trim();
-		} catch (err) {
-			if (ProviderFailure.isAbort(err)) {
-				trace.noted(`Timed out after ${timeoutMs}ms`);
-			} else if (ProviderFailure.isContextOverflow(err)) {
-				trace.noted(
-					"Model context exceeded mid-loop — synthesizing from gathered evidence.",
-				);
-			} else {
-				return this.degrade(question, err, trace, steps, started);
-			}
+		const steps = outcome.steps;
+		let answer = outcome.status === "completed" ? outcome.text : "";
+
+		if (outcome.status === "failed") {
+			return this.degrade(question, outcome.error, trace, steps, started);
+		}
+		if (outcome.status === "interrupted") {
+			trace.noted(
+				outcome.reason === "timeout"
+					? `Timed out after ${timeoutMs}ms`
+					: "Model context exceeded mid-loop — synthesizing from gathered evidence.",
+			);
 		}
 
 		// The provider cannot be made to force a tool call (LM Studio ignores
@@ -201,8 +173,7 @@ export class ResearchAgent {
 
 		if (!answer) {
 			answer =
-				(await this.synthesize(question, ledger, trace, timeoutMs, model)) ??
-				"";
+				(await this.synthesize(question, ledger, trace, timeoutMs)) ?? "";
 		}
 		if (!answer) {
 			return this.degrade(
@@ -217,7 +188,7 @@ export class ResearchAgent {
 		// Small models drop [n] markers inconsistently on terse answers. One
 		// cheap annotation pass beats returning an uncitable result.
 		if (!CitationMarkers.present(answer) && !ledger.isEmpty) {
-			answer = await this.addCitations(answer, ledger, trace, timeoutMs, model);
+			answer = await this.addCitations(answer, ledger, trace, timeoutMs);
 		}
 
 		return {
@@ -245,25 +216,16 @@ export class ResearchAgent {
 		ledger: EvidenceLedger,
 		trace: ResearchTrace,
 		timeoutMs: number,
-		model: Awaited<ReturnType<AiSdkChatModel["resolve"]>>,
-	): Promise<string | null> {
-		if (ledger.isEmpty) return null;
+	): Promise<string | undefined> {
+		if (ledger.isEmpty) return undefined;
 		trace.noted("Synthesizing answer from evidence…");
-		try {
-			const result = await generateText({
-				model,
-				system: ResearchPrompts.SYSTEM,
-				prompt:
-					`Question: ${question}\n\nEvidence gathered from the codebase:\n\n` +
-					`${ledger.digest()}\n\n${ResearchPrompts.FORCE_ANSWER}`,
-				temperature: 0,
-				abortSignal: AbortSignal.timeout(timeoutMs),
-			});
-			return result.text.trim() || null;
-		} catch (err) {
-			ProviderFailure.debug("evidence synthesis", err);
-			return null;
-		}
+		return this.chat.complete({
+			system: ResearchPrompts.SYSTEM,
+			prompt:
+				`Question: ${question}\n\nEvidence gathered from the codebase:\n\n` +
+				`${ledger.digest()}\n\n${ResearchPrompts.FORCE_ANSWER}`,
+			timeoutMs,
+		});
 	}
 
 	/** Ask the model to insert markers into its own answer, wording unchanged. */
@@ -272,23 +234,15 @@ export class ResearchAgent {
 		ledger: EvidenceLedger,
 		trace: ResearchTrace,
 		timeoutMs: number,
-		model: Awaited<ReturnType<AiSdkChatModel["resolve"]>>,
 	): Promise<string> {
 		trace.noted("Answer had no citations — adding them.");
-		try {
-			const result = await generateText({
-				model,
-				temperature: 0,
-				abortSignal: AbortSignal.timeout(timeoutMs),
-				system: ResearchPrompts.ADD_CITATIONS,
-				prompt: `Sources:\n${ledger.menu()}\n\nAnswer to annotate:\n${answer}`,
-			});
-			const revised = result.text.trim();
-			return CitationMarkers.present(revised) ? revised : answer;
-		} catch (err) {
-			ProviderFailure.debug("citation retry", err);
-			return answer;
-		}
+		const revised = await this.chat.complete({
+			system: ResearchPrompts.ADD_CITATIONS,
+			prompt: `Sources:\n${ledger.menu()}\n\nAnswer to annotate:\n${answer}`,
+			timeoutMs,
+		});
+		// Keep the original if the retry failed or still has no markers.
+		return revised && CitationMarkers.present(revised) ? revised : answer;
 	}
 
 	/** Last resort: return the raw hits, clearly marked as un-synthesized. */
@@ -299,7 +253,6 @@ export class ResearchAgent {
 		steps: number,
 		started: number,
 	): Promise<ResearchResult> {
-		ProviderFailure.debug("research", error);
 		const message = error instanceof Error ? error.message : String(error);
 		trace.noted(`Synthesis unavailable: ${message}`);
 

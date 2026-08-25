@@ -8,10 +8,10 @@ import type {
 	VectorHit,
 } from "../../domain/ports/ChunkRepositoryPort.js";
 import type { EmbedderPort } from "../../domain/ports/EmbedderPort.js";
+import type { SessionStorePort } from "../../domain/ports/SessionStorePort.js";
 import type { VocabRepositoryPort } from "../../domain/ports/VocabRepositoryPort.js";
 import type { ProjectId } from "../../domain/project/ProjectId.js";
 import type { Hit } from "../../domain/retrieval/Hit.js";
-import type { FacetSessionStore } from "../../infrastructure/fs/FacetSessionStore.js";
 import type { FacetCluster, FacetEngine } from "./FacetEngine.js";
 
 export interface FacetOptions {
@@ -63,7 +63,7 @@ export class FacetNavigator {
 		private readonly chunks: ChunkRepositoryPort,
 		private readonly vocab: VocabRepositoryPort,
 		private readonly engine: FacetEngine,
-		private readonly sessions: FacetSessionStore,
+		private readonly sessions: SessionStorePort,
 		private readonly projectId: () => ProjectId,
 	) {}
 

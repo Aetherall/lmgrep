@@ -35,10 +35,14 @@ export class TreeSitterChunker implements ChunkerPort {
 		const language = this.catalog.forFile(filePath);
 		if (!language) return this.fallback.chunk(filePath, cwd);
 
+		// Parser.init() must run before any Language.load(): it bootstraps the
+		// wasm runtime that grammar loading calls into. Reversing these two
+		// lines fails with "cannot read loadWebAssemblyModule of undefined".
+		const parser = await this.getParser();
+
 		const grammar = await this.loadGrammar(language);
 		if (!grammar) return this.fallback.chunk(filePath, cwd);
 
-		const parser = await this.getParser();
 		parser.setLanguage(grammar);
 
 		const source = readFileSync(join(cwd, filePath), "utf-8");

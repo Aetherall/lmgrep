@@ -12,10 +12,10 @@ import type {
 import type { EmbedderPort } from "../../domain/ports/EmbedderPort.js";
 import type { FileManifestRepositoryPort } from "../../domain/ports/FileManifestRepositoryPort.js";
 import type { IndexMaintenancePort } from "../../domain/ports/IndexMaintenancePort.js";
+import type { LockPort } from "../../domain/ports/LockPort.js";
 import type { LoggerPort } from "../../domain/ports/LoggerPort.js";
 import type { WorkspacePort } from "../../domain/ports/WorkspacePort.js";
 import type { DatabaseLocation } from "../../domain/project/DatabaseLocation.js";
-import type { DatabaseLocks } from "../../infrastructure/fs/DatabaseLocks.js";
 import type { BranchBootstrapper } from "./BranchBootstrapper.js";
 import type { BranchManifestSweeper } from "./BranchManifestSweeper.js";
 import { Duration } from "./Duration.js";
@@ -42,7 +42,7 @@ export interface IndexBuilderDependencies {
 	config: LmgrepConfig;
 	location: DatabaseLocation;
 	/** Serializes writes against any other indexer on this database. */
-	locks: DatabaseLocks;
+	locks: LockPort;
 	/** Records the model and dimensions this run indexed with. */
 	recordMetadata: (dimensions: number | undefined) => void;
 	/** Reloads a wedged local model mid-run; false when not possible. */

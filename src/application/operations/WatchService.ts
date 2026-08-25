@@ -1,7 +1,7 @@
 import type { LmgrepConfig } from "../../domain/config/LmgrepConfig.js";
+import type { LockPort } from "../../domain/ports/LockPort.js";
 import type { LoggerPort } from "../../domain/ports/LoggerPort.js";
 import type { WorkspacePort } from "../../domain/ports/WorkspacePort.js";
-import type { DatabaseLocks } from "../../infrastructure/fs/DatabaseLocks.js";
 import type { IndexBuilder } from "../indexing/IndexBuilder.js";
 
 /**
@@ -40,7 +40,7 @@ export class WatchService {
 		private readonly config: LmgrepConfig,
 		private readonly cwd: string,
 		private readonly logger: LoggerPort,
-		private readonly locks: DatabaseLocks,
+		private readonly locks: LockPort,
 	) {}
 
 	/**

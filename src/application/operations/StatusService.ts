@@ -2,9 +2,9 @@ import type { LmgrepConfig } from "../../domain/config/LmgrepConfig.js";
 import type { Vector } from "../../domain/faceting/Vector.js";
 import type { ChunkRepositoryPort } from "../../domain/ports/ChunkRepositoryPort.js";
 import type { EmbedderPort } from "../../domain/ports/EmbedderPort.js";
+import type { IndexMetadataPort } from "../../domain/ports/IndexMetadataPort.js";
 import type { DatabaseLocation } from "../../domain/project/DatabaseLocation.js";
 import type { ProjectLocator } from "../../domain/project/ProjectLocator.js";
-import type { ProjectMetadataStore } from "../../infrastructure/fs/ProjectMetadataStore.js";
 import { Deadline } from "./Deadline.js";
 
 export interface StatusInfo {
@@ -41,7 +41,7 @@ export class StatusService {
 		private readonly chunks: ChunkRepositoryPort,
 		private readonly embedder: EmbedderPort,
 		private readonly locator: ProjectLocator,
-		private readonly metadata: ProjectMetadataStore,
+		private readonly metadata: IndexMetadataPort,
 		private readonly location: DatabaseLocation,
 		private readonly config: LmgrepConfig,
 		private readonly cwd: string,
