@@ -1,91 +1,91 @@
 {
-  "name": "lmgrep",
-  "version": "0.1.0",
-  "description": "Semantic code search with any AI embedding provider",
-  "type": "module",
-  "bin": {
-    "lmgrep": "./dist/cli.js",
-    "lmgrep-mcp": "./dist/mcp.js"
-  },
-  "pi": {
-    "extensions": [
-      "./pi-extension/index.ts"
-    ]
-  },
-  "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
-    "start": "node dist/cli.js",
-    "check": "biome check --write .",
-    "lint": "biome lint ."
-  },
-  "keywords": [
-    "semantic-search",
-    "code-search",
-    "embeddings",
-    "tree-sitter",
-    "ai"
-  ],
-  "author": "",
-  "license": "GPL-3.0-only",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/Aetherall/lmgrep.git"
-  },
-  "files": [
-    "dist",
-    "completions",
-    "README.md"
-  ],
-  "packageManager": "pnpm@10.28.0",
-  "dependencies": {
-    "@lancedb/lancedb": "^0.27.2",
-    "@lumis-sh/wasm-bash": "^0.26.1",
-    "@lumis-sh/wasm-c": "^0.26.1",
-    "@lumis-sh/wasm-cpp": "^0.26.0",
-    "@lumis-sh/wasm-csharp": "^0.26.1",
-    "@lumis-sh/wasm-css": "^0.26.2",
-    "@lumis-sh/wasm-go": "^0.26.1",
-    "@lumis-sh/wasm-html": "^0.26.1",
-    "@lumis-sh/wasm-java": "^0.26.1",
-    "@lumis-sh/wasm-javascript": "^0.26.2",
-    "@lumis-sh/wasm-json": "^0.26.2",
-    "@lumis-sh/wasm-kotlin": "^0.26.3",
-    "@lumis-sh/wasm-lua": "^0.26.1",
-    "@lumis-sh/wasm-markdown": "^0.26.1",
-    "@lumis-sh/wasm-nix": "^0.26.0",
-    "@lumis-sh/wasm-php": "^0.26.2",
-    "@lumis-sh/wasm-python": "^0.26.1",
-    "@lumis-sh/wasm-ruby": "^0.26.1",
-    "@lumis-sh/wasm-rust": "^0.26.3",
-    "@lumis-sh/wasm-scala": "^0.26.1",
-    "@lumis-sh/wasm-swift": "^0.26.1",
-    "@lumis-sh/wasm-toml": "^0.26.0",
-    "@lumis-sh/wasm-tsx": "^0.26.1",
-    "@lumis-sh/wasm-typescript": "^0.26.1",
-    "@lumis-sh/wasm-vue": "^0.26.0",
-    "@lumis-sh/wasm-yaml": "^0.26.0",
-    "@lumis-sh/wasm-zig": "^0.26.0",
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "ai": "^6.0.149",
-    "apache-arrow": "^21.1.0",
-    "cli-progress": "^3.12.0",
-    "commander": "^14.0.3",
-    "glob": "^13.0.6",
-    "ignore": "^7.0.5",
-    "stemmer": "^2.0.1",
-    "web-tree-sitter": "^0.26.9",
-    "yaml": "^2.8.3",
-    "zod": "^4.3.6"
-  },
-  "devDependencies": {
-    "@ai-sdk/openai": "^3.0.51",
-    "@biomejs/biome": "^2.4.10",
-    "@types/cli-progress": "^3.11.6",
-    "@types/node": "^25.5.2",
-    "typescript": "^6.0.2"
-  },
-  "optionalDependencies": {
-    "hyperswarm": "^4.17.0"
-  }
+	"name": "lmgrep",
+	"version": "0.1.0",
+	"description": "Semantic code search with any AI embedding provider",
+	"type": "module",
+	"bin": {
+		"lmgrep": "./dist/cli.js",
+		"lmgrep-mcp": "./dist/mcp.js"
+	},
+	"pi": {
+		"extensions": [
+			"./pi-extension/index.ts"
+		]
+	},
+	"scripts": {
+		"build": "tsc",
+		"dev": "tsc --watch",
+		"start": "node dist/cli.js",
+		"check": "biome check --write .",
+		"lint": "biome lint ."
+	},
+	"keywords": [
+		"semantic-search",
+		"code-search",
+		"embeddings",
+		"tree-sitter",
+		"ai"
+	],
+	"author": "",
+	"license": "GPL-3.0-only",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/Aetherall/lmgrep.git"
+	},
+	"files": [
+		"dist",
+		"completions",
+		"README.md"
+	],
+	"packageManager": "pnpm@10.28.0",
+	"dependencies": {
+		"@lancedb/lancedb": "^0.27.2",
+		"@lumis-sh/wasm-bash": "^0.26.1",
+		"@lumis-sh/wasm-c": "^0.26.1",
+		"@lumis-sh/wasm-cpp": "^0.26.0",
+		"@lumis-sh/wasm-csharp": "^0.26.1",
+		"@lumis-sh/wasm-css": "^0.26.2",
+		"@lumis-sh/wasm-go": "^0.26.1",
+		"@lumis-sh/wasm-html": "^0.26.1",
+		"@lumis-sh/wasm-java": "^0.26.1",
+		"@lumis-sh/wasm-javascript": "^0.26.2",
+		"@lumis-sh/wasm-json": "^0.26.2",
+		"@lumis-sh/wasm-kotlin": "^0.26.3",
+		"@lumis-sh/wasm-lua": "^0.26.1",
+		"@lumis-sh/wasm-markdown": "^0.26.1",
+		"@lumis-sh/wasm-nix": "^0.26.0",
+		"@lumis-sh/wasm-php": "^0.26.2",
+		"@lumis-sh/wasm-python": "^0.26.1",
+		"@lumis-sh/wasm-ruby": "^0.26.1",
+		"@lumis-sh/wasm-rust": "^0.26.3",
+		"@lumis-sh/wasm-scala": "^0.26.1",
+		"@lumis-sh/wasm-swift": "^0.26.1",
+		"@lumis-sh/wasm-toml": "^0.26.0",
+		"@lumis-sh/wasm-tsx": "^0.26.1",
+		"@lumis-sh/wasm-typescript": "^0.26.1",
+		"@lumis-sh/wasm-vue": "^0.26.0",
+		"@lumis-sh/wasm-yaml": "^0.26.0",
+		"@lumis-sh/wasm-zig": "^0.26.0",
+		"@modelcontextprotocol/sdk": "^1.29.0",
+		"ai": "^6.0.149",
+		"apache-arrow": "^21.1.0",
+		"cli-progress": "^3.12.0",
+		"commander": "^14.0.3",
+		"glob": "^13.0.6",
+		"ignore": "^7.0.5",
+		"stemmer": "^2.0.1",
+		"web-tree-sitter": "^0.26.9",
+		"yaml": "^2.8.3",
+		"zod": "^4.3.6"
+	},
+	"devDependencies": {
+		"@ai-sdk/openai": "^3.0.51",
+		"@biomejs/biome": "^2.4.10",
+		"@types/cli-progress": "^3.11.6",
+		"@types/node": "^25.5.2",
+		"typescript": "^6.0.2"
+	},
+	"optionalDependencies": {
+		"hyperswarm": "^4.17.0"
+	}
 }
