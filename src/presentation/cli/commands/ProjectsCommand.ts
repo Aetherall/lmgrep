@@ -68,8 +68,13 @@ export class ProjectsCommand {
 			)
 			.option("--force", "Skip confirmation")
 			.option("-d, --dry", "Show what would be deleted, and stop")
-			.action((options: { force?: boolean; dry?: boolean }) =>
-				this.collect(options),
+			.option(
+				"--unknown",
+				"Also delete indexes that record no project at all (usually interrupted runs)",
+			)
+			.action(
+				(options: { force?: boolean; dry?: boolean; unknown?: boolean }) =>
+					this.collect(options),
 			);
 	}
 
@@ -173,16 +178,37 @@ export class ProjectsCommand {
 		renderer.line(`Deleted ${path} (${DiskUsage.format(bytes)})`);
 	}
 
+	/**
+	 * Delete indexes whose project is gone.
+	 *
+	 * "Records no project" is excluded unless asked for. It is a recursive
+	 * delete, and an index with no metadata is not evidence that its project
+	 * vanished — only that nothing was written down about it. Treating the two
+	 * as one would have made `gc` destroy far more than it claimed to.
+	 */
 	private async collect(options: {
 		force?: boolean;
 		dry?: boolean;
+		unknown?: boolean;
 	}): Promise<void> {
 		const { renderer } = this.context;
 		const inventory = this.inventory().collect();
-		const dead = inventory.entries.filter((e) => !e.rootExists);
+		const dead = inventory.entries.filter(
+			(e) =>
+				e.state === "orphaned" ||
+				(options.unknown && e.state === "unattributable"),
+		);
+		const skipped = options.unknown
+			? 0
+			: inventory.entries.filter((e) => e.state === "unattributable").length;
 
 		if (dead.length === 0 && inventory.dangling === 0) {
 			renderer.line("Nothing to collect — every index has a project.");
+			if (skipped > 0) {
+				renderer.line(
+					`${skipped} index(es) record no project. \`--unknown\` includes them.`,
+				);
+			}
 			return;
 		}
 
@@ -193,10 +219,19 @@ export class ProjectsCommand {
 			);
 			for (const entry of dead) {
 				renderer.line(
-					`  ${DiskUsage.format(entry.bytes).padStart(6)}  ${entry.root ?? "(unknown project)"}`,
+					`  ${DiskUsage.format(entry.bytes).padStart(6)}  ${entry.root ?? "(records no project)"}`,
 				);
 				renderer.line(`          ${entry.databasePath}`);
 			}
+		}
+		if (skipped > 0) {
+			const bytes = inventory.entries
+				.filter((e) => e.state === "unattributable")
+				.reduce((sum, e) => sum + e.bytes, 0);
+			renderer.line(
+				`\nSkipping ${skipped} index(es) that record no project (${DiskUsage.format(bytes)}). ` +
+					"Pass `--unknown` to delete those too.",
+			);
 		}
 		if (inventory.dangling > 0) {
 			renderer.line(

@@ -271,7 +271,8 @@ export class Renderer {
 			const marks = [
 				entry.kind === "legacy" ? "legacy" : undefined,
 				entry.name ? "standalone" : undefined,
-				entry.rootExists ? undefined : "project gone",
+				entry.state === "orphaned" ? "project gone" : undefined,
+				entry.state === "unattributable" ? "unattributable" : undefined,
 			].filter(Boolean);
 			this.out(
 				`${DiskUsage.format(entry.bytes).padStart(7)}  ${entry.name ?? entry.root ?? "(unknown project)"}` +
@@ -288,7 +289,10 @@ export class Renderer {
 		);
 
 		const legacy = inventory.entries.filter((e) => e.kind === "legacy").length;
-		const dead = inventory.entries.filter((e) => !e.rootExists).length;
+		const dead = inventory.entries.filter((e) => e.state === "orphaned").length;
+		const unknown = inventory.entries.filter(
+			(e) => e.state === "unattributable",
+		).length;
 		if (legacy > 0) {
 			this.out(
 				`${legacy} still in the state directory — run \`lmgrep projects adopt\` in each project to move them in.`,
@@ -297,6 +301,11 @@ export class Renderer {
 		if (dead > 0) {
 			this.out(
 				`${dead} whose project no longer exists — \`lmgrep projects gc\` reclaims them.`,
+			);
+		}
+		if (unknown > 0) {
+			this.out(
+				`${unknown} record no project — \`lmgrep projects gc --unknown\` includes them.`,
 			);
 		}
 		if (inventory.dangling > 0) {

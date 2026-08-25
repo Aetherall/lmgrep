@@ -15,8 +15,13 @@ export interface InventoryEntry {
 	dimensions?: number;
 	indexedAt?: string;
 	bytes: number;
-	/** Whether the working tree it describes still exists. */
-	rootExists: boolean;
+	/**
+	 * `live`           — its working tree is there.
+	 * `orphaned`       — it names a working tree that is gone.
+	 * `unattributable` — it records no working tree at all, so nothing can be
+	 *                    concluded about whether its project still exists.
+	 */
+	state: "live" | "orphaned" | "unattributable";
 	/**
 	 * `repository` — inside the repo it indexes, the current scheme.
 	 * `standalone` — in the state directory, for corpora with no repo.
@@ -69,7 +74,8 @@ export class IndexInventory {
 				// A standalone index outlives the directory it was built from,
 				// so its project cannot be "gone" — collecting it on that
 				// basis would delete a corpus that is working fine.
-				rootExists: registered.name ? true : existsSync(registered.root),
+				state:
+					registered.name || existsSync(registered.root) ? "live" : "orphaned",
 				kind: this.kindOf(registered.databasePath),
 			});
 		}
@@ -85,7 +91,7 @@ export class IndexInventory {
 				dimensions: meta?.dimensions,
 				indexedAt: meta?.indexedAt,
 				bytes: this.sizeOf(path),
-				rootExists: meta?.root ? existsSync(meta.root) : false,
+				state: this.stateOf(meta?.root),
 				kind: "legacy",
 			});
 		}
@@ -96,6 +102,20 @@ export class IndexInventory {
 			dangling: this.registry.dangling().length,
 			totalBytes: entries.reduce((sum, e) => sum + e.bytes, 0),
 		};
+	}
+
+	/**
+	 * Whether an index still has a project.
+	 *
+	 * "No recorded root" is kept distinct from "recorded root is gone". They
+	 * look the same in a listing and are not the same thing at all: the second
+	 * is safe to delete, while the first is an index whose provenance was
+	 * simply never written down — an interrupted first run, most often, but
+	 * possibly a working index for a project that is right there.
+	 */
+	private stateOf(root: string | undefined): InventoryEntry["state"] {
+		if (!root) return "unattributable";
+		return existsSync(root) ? "live" : "orphaned";
 	}
 
 	/**
