@@ -13,6 +13,13 @@ import { TableName } from "../lancedb/LanceTables.js";
  */
 export class ProjectMetadataStore implements IndexMetadataPort {
 	private static readonly FILE = "lmgrep.json";
+	/** What an lmgrep database looks like from the outside. */
+	private static readonly MARKERS = new Set<string>([
+		ProjectMetadataStore.FILE,
+		`${TableName.Chunks}.lance`,
+		`${TableName.Files}.lance`,
+		`${TableName.LegacyVocab}.lance`,
+	]);
 
 	read(databasePath: string): IndexMetadata | undefined {
 		try {
@@ -69,13 +76,23 @@ export class ProjectMetadataStore implements IndexMetadataPort {
 			return false;
 		}
 		if (entries.length === 0) return true;
+		return entries.some((e) => ProjectMetadataStore.MARKERS.has(e));
+	}
 
-		const markers = new Set<string>([
-			ProjectMetadataStore.FILE,
-			`${TableName.Chunks}.lance`,
-			`${TableName.Files}.lance`,
-			`${TableName.LegacyVocab}.lance`,
-		]);
-		return entries.some((e) => markers.has(e));
+	/**
+	 * Whether a directory actually holds an index.
+	 *
+	 * Same markers as {@link isDatabaseDirectory}, without its allowance for
+	 * an empty directory — the two are kept on one marker set so that what
+	 * counts as a database is defined in exactly one place.
+	 */
+	holdsIndex(databasePath: string): boolean {
+		try {
+			return readdirSync(databasePath).some((e) =>
+				ProjectMetadataStore.MARKERS.has(e),
+			);
+		} catch {
+			return false;
+		}
 	}
 }

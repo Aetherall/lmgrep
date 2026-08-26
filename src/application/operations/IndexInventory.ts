@@ -82,6 +82,13 @@ export class IndexInventory {
 
 		for (const path of this.state.legacyDatabaseDirectories()) {
 			if (seen.has(path)) continue;
+			// A directory with no sidecar and no tables is not an index, and
+			// saying otherwise sends the user to adopt something that is not
+			// there. This is not hypothetical: a server left running across an
+			// upgrade still writes the previous layout, recreating its
+			// database directory under the state root every time it starts a
+			// scan.
+			if (!this.metadata.holdsIndex(path)) continue;
 			const meta = this.metadata.read(path);
 			entries.push({
 				databasePath: path,
