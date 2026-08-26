@@ -7,11 +7,6 @@
 		"lmgrep": "./dist/cli.js",
 		"lmgrep-mcp": "./dist/mcp.js"
 	},
-	"pi": {
-		"extensions": [
-			"./pi-extension/index.ts"
-		]
-	},
 	"scripts": {
 		"build": "tsc",
 		"dev": "tsc --watch",

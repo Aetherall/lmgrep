@@ -294,18 +294,6 @@ gemini mcp add lmgrep -- lmgrep mcp
 gemini mcp add lmgrep -- npx -y lmgrep mcp
 ```
 
-### Pi coding agent
-
-Pi doesn't speak MCP — it uses TypeScript extensions instead. lmgrep ships one at [`pi-extension/`](./pi-extension) that registers two tools: `lmgrep_search` and `lmgrep_list_other_indexed_projects`. It imports lmgrep directly, runs an in-process file watcher to keep the index fresh, and gates tool visibility on embedder health — if lmgrep isn't configured, or the embedding provider is unreachable, the tools stay hidden so you get a clean tool surface instead of a broken one. Configure lmgrep first (`lmgrep init`) before relying on it inside Pi.
-
-Install via Pi's package manager:
-
-```sh
-pi install git:github.com/Aetherall/lmgrep
-```
-
-Update with `pi update`, remove with `pi remove git:github.com/Aetherall/lmgrep`, and list installed extensions with `pi list`.
-
 ### OpenCode
 
 OpenCode has no one-shot install flag — add an entry to `~/.config/opencode/opencode.json` (or project-level `opencode.json`):
