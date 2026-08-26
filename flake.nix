@@ -17,7 +17,7 @@
 
         pnpmDeps = pkgs.fetchPnpmDeps {
           pname = "lmgrep";
-          version = "0.1.0";
+          version = "0.2.0";
           inherit src pnpm;
           hash = "sha256-kq4o/JUBoDo2lM4yJSAobn03Emiu9xXutcu1LEQ03SY=";
           fetcherVersion = 3;
@@ -31,7 +31,7 @@
 
         lmgrep = pkgs.stdenv.mkDerivation {
           pname = "lmgrep";
-          version = "0.1.0";
+          version = "0.2.0";
           inherit src pnpmDeps;
 
           nativeBuildInputs = commonBuildInputs ++ [
@@ -68,7 +68,7 @@
 
         lmgrep-mcp = pkgs.stdenv.mkDerivation {
           pname = "lmgrep-mcp";
-          version = "0.1.0";
+          version = "0.2.0";
           inherit src pnpmDeps;
 
           nativeBuildInputs = commonBuildInputs;

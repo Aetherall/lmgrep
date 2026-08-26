@@ -31,9 +31,21 @@ jobs:
           set -e
 
           latest=$(npm view lmgrep "dist-tags.latest" 2>/dev/null || echo "0.0.0")
-          next=$(echo "$latest" | awk -F'[.-]' '{ print $1 "." $2 "." $3+1 }')
+          declared=$(node -p "require('./package.json').version")
 
-          echo "Latest: $latest -> Next: $next"
+          # A version written into package.json wins when it is ahead of what
+          # is published; otherwise the patch series continues from the
+          # registry. Without this the awk bump silently overwrote a
+          # deliberate major or minor bump with latest+1, so a breaking
+          # release could only ever ship as a patch.
+          highest=$(printf '%s\n%s\n' "$latest" "$declared" | sort -V | tail -1)
+          if [ "$highest" = "$latest" ]; then
+            next=$(echo "$latest" | awk -F'[.-]' '{ print $1 "." $2 "." $3+1 }')
+          else
+            next="$declared"
+          fi
+
+          echo "Latest: $latest  Declared: $declared -> Next: $next"
           npm pkg set version="$next"
 
           npm publish --provenance --access public
