@@ -9,6 +9,7 @@
 	},
 	"scripts": {
 		"build": "tsc",
+		"build:standalone": "bun build ./standalone/cli.ts --compile --minify --outfile ./dist/lmgrep",
 		"dev": "tsc --watch",
 		"start": "node dist/cli.js",
 		"check": "biome check --write .",

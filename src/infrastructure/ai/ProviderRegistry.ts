@@ -48,13 +48,23 @@ export interface ProviderRequest {
  * expressed as {@link ProviderRequest.preferFactoryWhenBaseUrlSet}.
  */
 export class ProviderRegistry {
+	private static readonly OPENAI_COMPATIBLE_PROVIDERS = new Set([
+		"docker",
+		"lmstudio",
+		"ollama",
+	]);
+
 	constructor(
 		private readonly loader: ProviderModuleLoader = new ProviderModuleLoader(),
 	) {}
 
 	async instantiate(request: ProviderRequest): Promise<unknown> {
 		const providerName = request.reference.provider;
-		const packageName = request.packageName ?? `@ai-sdk/${providerName}`;
+		const packageName =
+			request.packageName ??
+			(ProviderRegistry.OPENAI_COMPATIBLE_PROVIDERS.has(providerName)
+				? "@ai-sdk/openai-compatible"
+				: `@ai-sdk/${providerName}`);
 		const module = await this.loader.load(packageName);
 
 		let instance = module[providerName];

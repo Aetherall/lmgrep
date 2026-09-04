@@ -16,6 +16,7 @@ export class OllamaProbe implements RuntimeProbe {
 	/** Models currently resident in memory. */
 	private static readonly RUNNING_URL = "http://localhost:11434/api/ps";
 	static readonly BASE_URL = "http://localhost:11434/v1";
+	static readonly PROVIDER_PACKAGE = "@ai-sdk/openai-compatible";
 	private static readonly TIMEOUT_MS = 3000;
 
 	/** Name fragments that reliably indicate an embedding model. */
@@ -51,6 +52,7 @@ export class OllamaProbe implements RuntimeProbe {
 			label: "Ollama",
 			providerId: "ollama",
 			baseURL: OllamaProbe.BASE_URL,
+			providerPackage: OllamaProbe.PROVIDER_PACKAGE,
 			models,
 		};
 	}

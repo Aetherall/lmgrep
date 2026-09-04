@@ -6,6 +6,7 @@ import { CodeLocation } from "../../domain/corpus/CodeLocation.js";
 import { ContentHash } from "../../domain/corpus/ContentHash.js";
 import type { ChunkerPort } from "../../domain/ports/ChunkerPort.js";
 import { ChunkContextBuilder } from "./ChunkContextBuilder.js";
+import { embeddedParserPath } from "./EmbeddedTreeSitterAssets.js";
 import { LanguageCatalog, type LanguageConfig } from "./LanguageCatalog.js";
 import { SlidingWindowChunker } from "./SlidingWindowChunker.js";
 
@@ -181,7 +182,10 @@ export class TreeSitterChunker implements ChunkerPort {
 
 	private async getParser(): Promise<Parser> {
 		if (!this.parser) {
-			await Parser.init();
+			const parserWasm = embeddedParserPath();
+			await Parser.init(
+				parserWasm ? { locateFile: () => parserWasm } : undefined,
+			);
 			this.parser = new Parser();
 		}
 		return this.parser;

@@ -17,9 +17,9 @@ import { OllamaProbe } from "./OllamaProbe.js";
 export class LocalRuntimeDetector {
 	constructor(
 		private readonly probes: readonly RuntimeProbe[] = [
+			new DockerModelRunnerProbe(),
 			new LmStudioProbe(),
 			new OllamaProbe(),
-			new DockerModelRunnerProbe(),
 		],
 	) {}
 

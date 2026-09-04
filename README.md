@@ -25,6 +25,22 @@ lmgrep uses [Tree-sitter](https://tree-sitter.github.io/tree-sitter/) to parse s
 pnpm install -g lmgrep
 ```
 
+#### Standalone executable
+
+Release builds can bundle lmgrep, the Bun runtime, the OpenAI-compatible model
+adapter, LanceDB native binding, and every Tree-sitter grammar into one file:
+
+```sh
+pnpm install
+pnpm build:standalone
+./dist/lmgrep --help
+```
+
+The executable targets the operating system and architecture running Bun, so
+build each release artifact on its target platform. For the auto-detected
+local runtimes, users need neither Node.js, Bun, npm packages, nor a separately
+installed provider adapter.
+
 ### 2. Set up an embedding model
 
 Start a local inference server, then let lmgrep configure itself.
@@ -51,6 +67,9 @@ server, and run `lmgrep init`.
 writes the provider, base URL and any prefixes that model requires. Where the
 server also reports a chat model it configures `chatModel` too, which is what
 enables `lmgrep ask`.
+
+Use `lmgrep init --preview` to inspect the detected YAML without creating or
+overwriting the config file.
 
 This creates a config file at `~/.config/lmgrep/config.yml` (Linux) or `~/Library/Application Support/lmgrep/config.yml` (macOS).
 

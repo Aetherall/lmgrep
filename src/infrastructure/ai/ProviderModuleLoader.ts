@@ -1,18 +1,26 @@
 import { execSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { join } from "node:path";
+import * as openAICompatible from "@ai-sdk/openai-compatible";
 
 /**
  * Imports an AI SDK provider package.
  *
- * Providers are peer dependencies the user installs, so resolution has to
- * reach beyond this package's own `node_modules`: an `npm i -g @ai-sdk/openai`
- * is a normal setup and would otherwise fail to resolve.
+ * The OpenAI-compatible adapter is statically bundled so local runtimes work
+ * in the standalone executable. Other providers remain plugins: resolution
+ * reaches beyond this package's own `node_modules`, allowing a global install.
  */
 export class ProviderModuleLoader {
 	private readonly cache = new Map<string, Record<string, unknown>>();
 
+	private readonly bundled = new Map<string, Record<string, unknown>>([
+		["@ai-sdk/openai-compatible", openAICompatible],
+	]);
+
 	async load(packageName: string): Promise<Record<string, unknown>> {
+		const bundled = this.bundled.get(packageName);
+		if (bundled) return bundled;
+
 		const cached = this.cache.get(packageName);
 		if (cached) return cached;
 

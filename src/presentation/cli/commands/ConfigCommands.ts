@@ -37,15 +37,21 @@ export class ConfigCommands {
 			.command("init")
 			.description("Detect your local models and write the machine config")
 			.option("--force", "Overwrite the existing config")
-			.action((options: { force?: boolean }) => this.runInit(options));
+			.option("--preview", "Print the detected config without saving it")
+			.action((options: { force?: boolean; preview?: boolean }) =>
+				this.runInit(options),
+			);
 	}
 
-	private async runInit(options: { force?: boolean }): Promise<void> {
+	private async runInit(options: {
+		force?: boolean;
+		preview?: boolean;
+	}): Promise<void> {
 		const { renderer } = this.context;
 		const loader = new ConfigLoader();
 		const configPath = loader.globalConfigPath();
 
-		if (existsSync(configPath) && !options.force) {
+		if (existsSync(configPath) && !options.force && !options.preview) {
 			renderer.error(
 				`Config already exists at ${configPath}. Use --force to re-detect, or \`lmgrep config\` to edit.`,
 			);
@@ -59,8 +65,12 @@ export class ConfigCommands {
 		const runtime = await new LocalRuntimeDetector().detectBest();
 		if (!runtime) {
 			this.reportNoRuntime();
-			this.write(configPath, ConfigTemplate.render());
-			renderer.line(`\nWrote ${configPath} (set a model before indexing)`);
+			const contents = ConfigTemplate.render();
+			if (options.preview) this.preview(contents);
+			else {
+				this.write(configPath, contents);
+				renderer.line(`\nWrote ${configPath} (set a model before indexing)`);
+			}
 			return;
 		}
 
@@ -72,23 +82,24 @@ export class ConfigCommands {
 			this.keepConfigured(runtime, previous?.chatModel, "chat") ??
 			this.selectChatModel(runtime);
 
-		this.write(
-			configPath,
-			ConfigTemplate.render({
-				model: model ? `${runtime.providerId}:${model}` : undefined,
-				baseURL: model ? runtime.baseURL : undefined,
-				providerPackage: model ? runtime.providerPackage : undefined,
-				local: model ? true : undefined,
-				chatModel: chatModel ? `${runtime.providerId}:${chatModel}` : undefined,
-				prefixes: this.prefixesFor(model, previous),
-				// Carried through rather than regenerated: this is tuning the
-				// user chose, and init has no better answer than they did.
-				batchSize: previous?.batchSize,
-				maxTokens: previous?.maxTokens,
-				dimensions: previous?.dimensions,
-			}),
-		);
-		renderer.line(`Wrote ${configPath}`);
+		const contents = ConfigTemplate.render({
+			model: model ? `${runtime.providerId}:${model}` : undefined,
+			baseURL: model ? runtime.baseURL : undefined,
+			providerPackage: model ? runtime.providerPackage : undefined,
+			local: model ? true : undefined,
+			chatModel: chatModel ? `${runtime.providerId}:${chatModel}` : undefined,
+			prefixes: this.prefixesFor(model, previous),
+			// Carried through rather than regenerated: this is tuning the
+			// user chose, and init has no better answer than they did.
+			batchSize: previous?.batchSize,
+			maxTokens: previous?.maxTokens,
+			dimensions: previous?.dimensions,
+		});
+		if (options.preview) this.preview(contents);
+		else {
+			this.write(configPath, contents);
+			renderer.line(`Wrote ${configPath}`);
+		}
 	}
 
 	/**
@@ -109,7 +120,12 @@ export class ConfigCommands {
 		const reference = ModelIdentity.of(configured);
 		if (reference.provider !== runtime.providerId) return undefined;
 
-		if (!runtime.models.some((m) => m.id === reference.family)) {
+		const available = runtime.models.find((model) =>
+			ModelIdentity.of(`${runtime.providerId}:${model.id}`).isSameFamilyAs(
+				reference,
+			),
+		);
+		if (!available) {
 			this.context.renderer.line(
 				`Configured ${kind} model "${reference.family}" is no longer available in ${runtime.label}.`,
 			);
@@ -117,9 +133,9 @@ export class ConfigCommands {
 		}
 
 		this.context.renderer.line(
-			`Keeping configured ${kind} model: ${reference.family}`,
+			`Keeping configured ${kind} model: ${available.id}`,
 		);
-		return reference.family;
+		return available.id;
 	}
 
 	/**
@@ -223,6 +239,10 @@ export class ConfigCommands {
 		renderer.line(
 			"Then run `lmgrep init` again to auto-configure, or edit the config by hand.",
 		);
+	}
+
+	private preview(contents: string): void {
+		this.context.renderer.line(`\n${contents.trimEnd()}`);
 	}
 
 	private write(configPath: string, contents: string): void {

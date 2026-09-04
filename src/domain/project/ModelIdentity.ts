@@ -55,14 +55,15 @@ export class ModelIdentity {
 		const rest = this.value.slice(colon + 1);
 
 		const lastColon = rest.lastIndexOf(":");
-		if (lastColon === -1) return rest;
-
-		const suffix = rest.slice(lastColon + 1);
-		if (ModelIdentity.VARIANT_SUFFIX.test(suffix)) {
-			return rest.slice(0, lastColon);
-		}
-		// Unrecognized trailing segment — likely part of the name itself.
-		return rest;
+		const suffix = lastColon === -1 ? "" : rest.slice(lastColon + 1);
+		const family =
+			lastColon !== -1 && ModelIdentity.VARIANT_SUFFIX.test(suffix)
+				? rest.slice(0, lastColon)
+				: rest;
+		return family.replace(
+			/^(?:docker\.io\/(?:ai|library)\/|docker\.io\/|huggingface\.co\/)/i,
+			"",
+		);
 	}
 
 	/** Whether two models produce interchangeable embeddings. */

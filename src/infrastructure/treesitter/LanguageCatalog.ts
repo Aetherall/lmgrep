@@ -1,4 +1,5 @@
 import { createRequire } from "node:module";
+import { embeddedGrammarPath } from "./EmbeddedTreeSitterAssets.js";
 
 const require = createRequire(import.meta.url);
 
@@ -407,6 +408,9 @@ export class LanguageCatalog {
 
 	/** Absolute path to a grammar's wasm, or undefined when not installed. */
 	wasmPathFor(lang: LanguageConfig): string | undefined {
+		const bundled = embeddedGrammarPath(lang.wasmFile);
+		if (bundled) return bundled;
+
 		const slug = lang.wasmFile
 			.replace(/^tree-sitter-/, "")
 			.replace(/\.wasm$/, "");
