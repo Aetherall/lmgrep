@@ -25,6 +25,8 @@ lmgrep uses [Tree-sitter](https://tree-sitter.github.io/tree-sitter/) to parse s
 pnpm install -g lmgrep
 ```
 
+Requires Node.js 20 or newer.
+
 #### Standalone executable
 
 Release builds can bundle lmgrep, the Bun runtime, the OpenAI-compatible model
@@ -33,7 +35,7 @@ adapter, LanceDB native binding, and every Tree-sitter grammar into one file:
 ```sh
 pnpm install
 pnpm build:standalone
-./dist/lmgrep --help
+./artifacts/lmgrep --help
 ```
 
 The executable targets the operating system and architecture running Bun, so
