@@ -216,6 +216,9 @@ export class ConfigCommands {
 		renderer.line("Start one of:");
 		renderer.line("  Ollama     curl -fsSL https://ollama.com/install.sh | sh");
 		renderer.line("  LM Studio  https://lmstudio.ai — enable the local server");
+		renderer.line(
+			"  Docker     https://docs.docker.com/ai/model-runner/ — pull an embedding model",
+		);
 		renderer.line("");
 		renderer.line(
 			"Then run `lmgrep init` again to auto-configure, or edit the config by hand.",

@@ -34,6 +34,7 @@
 	],
 	"packageManager": "pnpm@10.28.0",
 	"dependencies": {
+		"@ai-sdk/openai-compatible": "^3.0.41",
 		"@lancedb/lancedb": "^0.27.2",
 		"@lumis-sh/wasm-bash": "^0.26.1",
 		"@lumis-sh/wasm-c": "^0.26.1",
@@ -62,7 +63,7 @@
 		"@lumis-sh/wasm-yaml": "^0.26.0",
 		"@lumis-sh/wasm-zig": "^0.26.0",
 		"@modelcontextprotocol/sdk": "^1.29.0",
-		"ai": "^6.0.149",
+		"ai": "^7.0.84",
 		"apache-arrow": "^21.1.0",
 		"cli-progress": "^3.12.0",
 		"commander": "^14.0.3",
@@ -74,7 +75,7 @@
 		"zod": "^4.3.6"
 	},
 	"devDependencies": {
-		"@ai-sdk/openai": "^3.0.51",
+		"@ai-sdk/openai": "^4.0.51",
 		"@biomejs/biome": "^2.4.10",
 		"@types/cli-progress": "^3.11.6",
 		"@types/node": "^25.5.2",

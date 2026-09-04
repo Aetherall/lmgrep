@@ -1,3 +1,4 @@
+import { DockerModelRunnerProbe } from "./DockerModelRunnerProbe.js";
 import { LmStudioProbe } from "./LmStudioProbe.js";
 import type {
 	CatalogedModel,
@@ -18,6 +19,7 @@ export class LocalRuntimeDetector {
 		private readonly probes: readonly RuntimeProbe[] = [
 			new LmStudioProbe(),
 			new OllamaProbe(),
+			new DockerModelRunnerProbe(),
 		],
 	) {}
 

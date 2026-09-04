@@ -37,8 +37,15 @@ ollama pull nomic-embed-text
 lmgrep init
 ```
 
-Or with [LM Studio](https://lmstudio.ai): install an embedding model, enable
-the local server, and run `lmgrep init`.
+Or with [Docker Model Runner](https://docs.docker.com/ai/model-runner/):
+
+```sh
+docker model pull ai/mxbai-embed-large
+lmgrep init
+```
+
+LM Studio is supported too: install an embedding model, enable its local
+server, and run `lmgrep init`.
 
 `init` detects whichever server is running, picks an embedding model, and
 writes the provider, base URL and any prefixes that model requires. Where the
