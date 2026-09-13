@@ -7,7 +7,7 @@ lmgrep uses [Tree-sitter](https://tree-sitter.github.io/tree-sitter/) to parse s
 ## Features
 
 - **Any embedding provider** — works with Ollama, OpenAI, Google, or any provider supported by the [Vercel AI SDK](https://sdk.vercel.ai/)
-- **Tree-sitter chunking** — splits code at AST boundaries so search results are complete, meaningful units
+- **Tree-sitter chunking** — splits code at AST boundaries so search results are complete, meaningful units. JavaScript module variants (`.mjs`, `.cjs`) and TypeScript module variants (`.mts`, `.cts`) are indexed by default using their respective language grammars.
 - **The index lives in the repo** — under `.git/lmgrep/`, so `du` finds it, `rm -rf` removes it, and deleting a clone deletes its index
 - **One index per model** — switching embedding models selects a different database instead of invalidating the one you have; switching back is instant
 - **Ask (research mode)** — `lmgrep ask` runs a local model that searches, reads, and synthesizes a cited answer, so agents spend one call instead of many searches

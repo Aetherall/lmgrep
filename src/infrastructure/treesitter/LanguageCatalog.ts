@@ -46,7 +46,7 @@ export interface LanguageConfig {
 export const LANGUAGES: LanguageConfig[] = [
 	{
 		id: "javascript",
-		extensions: [".js", ".jsx"],
+		extensions: [".js", ".jsx", ".mjs", ".cjs"],
 		wasmFile: "tree-sitter-javascript.wasm",
 		chunkTypes: [
 			"function_declaration",
@@ -61,7 +61,7 @@ export const LANGUAGES: LanguageConfig[] = [
 	},
 	{
 		id: "typescript",
-		extensions: [".ts"],
+		extensions: [".ts", ".mts", ".cts"],
 		wasmFile: "tree-sitter-typescript.wasm",
 		chunkTypes: [
 			"function_declaration",

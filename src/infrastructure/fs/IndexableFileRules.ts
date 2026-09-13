@@ -53,7 +53,11 @@ export class IndexableFileRules {
 
 	static readonly CODE_EXTENSIONS = new Set([
 		".js",
+		".mjs",
+		".cjs",
 		".ts",
+		".mts",
+		".cts",
 		".jsx",
 		".tsx",
 		".py",
