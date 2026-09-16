@@ -35,6 +35,7 @@ test("real Docker indexing survives tag-to-digest alias changes without re-embed
 			process.env.LMGREP_TEST_DOCKER_URL ?? "http://localhost:12434/engines/v1",
 		provider: "@ai-sdk/openai-compatible",
 		batchSize: 1,
+		maxTokens: 4096,
 		local: true,
 		queryPrefix: "",
 		documentPrefix: "",
@@ -48,7 +49,8 @@ test("real Docker indexing survives tag-to-digest alias changes without re-embed
 	mkdirSync(cwd);
 	writeFileSync(
 		join(cwd, "arithmetic.ts"),
-		"export function addNumbers(left: number, right: number): number {\n  return left + right;\n}\n",
+		"export function addNumbers(left: number, right: number): number {\n  return left + right;\n}\n" +
+			`export const numericTokenStress = [${"1,".repeat(6000)}0];\n`,
 	);
 	const factory = new LmgrepFactory();
 	const first = await factory.open({ cwd, logger: new SilentLogger() });
@@ -58,7 +60,7 @@ test("real Docker indexing survives tag-to-digest alias changes without re-embed
 		path = first.location.path;
 		const built = await first.build({ files: ["arithmetic.ts"] });
 		assert.equal(built.failed, 0);
-		assert.ok(built.succeeded > 0);
+		assert.ok(built.succeeded > 2);
 		stored = new ProjectMetadataStore().read(path);
 		assert.match(
 			stored.embeddingProfile.artifact,

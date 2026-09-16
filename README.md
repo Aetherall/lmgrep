@@ -114,6 +114,8 @@ Two of these are the product; the rest you run once.
 There is no `repair`, `compact`, or `migrate`. Reconciling the manifest,
 dropping duplicate rows, compacting fragments and training the vector index all
 happen inside `lmgrep index`, which is the one moment you are already waiting.
+Cleanup scans scalar identifiers and deletes only unwanted row IDs in place; it
+does not load all embedding vectors into JavaScript or drop the chunks table.
 `prune` became `lmgrep projects rm`, which can see what it is deleting.
 
 ### Search options
@@ -204,6 +206,13 @@ repository names and tags do not. Two aliases for the same artifact and settings
 reuse one index, and embedding requests use the resolved digest so a retag during
 indexing cannot silently change the model. Different artifacts or prefix settings
 get separate indexes. Other providers retain their existing name-based lookup.
+
+With `maxTokens` configured, eligible Docker chunks are additionally split into
+UTF-8 byte-bounded segments using that value as a conservative byte budget,
+including the document prefix and context. This handles token-dense numbers,
+encoded assets and Unicode that the four-characters-per-token estimate
+undercounts, without truncating their content. The existing estimated-size filter
+still excludes chunks above `maxTokens` before segmentation.
 
 The digest identifies the complete Docker artifact, not just its weights.
 Repackaged artifacts with different digests are kept separate even when their

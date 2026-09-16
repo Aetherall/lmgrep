@@ -8,7 +8,6 @@ import type {
 	TableOptimizeReport,
 	VectorIndexState,
 } from "../../domain/ports/IndexMaintenancePort.js";
-import { ChunkRepository } from "./ChunkRepository.js";
 import { type LanceTables, TableName } from "./LanceTables.js";
 import { VectorIndexPolicy } from "./VectorIndexPolicy.js";
 
@@ -151,8 +150,8 @@ export class IndexMaintenance implements IndexMaintenancePort {
 	/**
 	 * Remove rows that should not be there: exact id duplicates (from
 	 * concurrent unlocked indexing) and chunks whose file version no branch
-	 * references any more. Survivors are rewritten into a fresh table, which is
-	 * also what reclaims the disk the dropped rows held.
+	 * references any more. Only scalar identifiers are scanned; deleting by row
+	 * id preserves the original table and its surviving vectors.
 	 */
 	async dedupe(): Promise<DedupeReport> {
 		const table = await this.tables.table(TableName.Chunks);
@@ -169,7 +168,7 @@ export class IndexMaintenance implements IndexMaintenancePort {
 			referenced.set(entry.filePath, set);
 		}
 
-		const kept: Record<string, unknown>[] = [];
+		const remove: bigint[] = [];
 		const seenIds = new Set<string>();
 		let duplicateIds = 0;
 		let staleVersions = 0;
@@ -177,24 +176,30 @@ export class IndexMaintenance implements IndexMaintenancePort {
 		const total = before;
 		const BATCH = 2000;
 		for (let offset = 0; offset < total; offset += BATCH) {
-			const rows = await table.query().limit(BATCH).offset(offset).toArray();
+			const rows = await table
+				.query()
+				.select(["id", "filePath", "fileHash"])
+				.withRowId()
+				.limit(BATCH)
+				.offset(offset)
+				.toArray();
 			if (rows.length === 0) break;
 			for (const row of rows) {
 				const id = row.id as string;
 				if (seenIds.has(id)) {
+					remove.push(row._rowid as bigint);
 					duplicateIds++;
 					continue;
 				}
-				seenIds.add(id);
-
 				const filePath = row.filePath as string;
 				const fileHash = (row.fileHash as string) ?? "";
 				// "" is the legacy wildcard — never stale.
 				if (fileHash !== "" && !referenced.get(filePath)?.has(fileHash)) {
+					remove.push(row._rowid as bigint);
 					staleVersions++;
 					continue;
 				}
-				kept.push(this.toPlainRow(row));
+				seenIds.add(id);
 			}
 		}
 
@@ -202,16 +207,18 @@ export class IndexMaintenance implements IndexMaintenancePort {
 			return { before, after: before, duplicateIds, staleVersions };
 		}
 
-		await this.tables.dropTable(TableName.Chunks);
-		if (kept.length > 0) {
-			const { table: rebuilt, seeded } = await this.tables.tableOrCreate(
-				TableName.Chunks,
-				kept,
+		for (let offset = 0; offset < remove.length; offset += BATCH) {
+			await table.delete(
+				`_rowid IN (${remove.slice(offset, offset + BATCH).join(",")})`,
 			);
-			if (!seeded) await rebuilt.add(kept);
 		}
 
-		return { before, after: kept.length, duplicateIds, staleVersions };
+		return {
+			before,
+			after: before - remove.length,
+			duplicateIds,
+			staleVersions,
+		};
 	}
 
 	async vectorIndexState(): Promise<VectorIndexState> {
@@ -251,23 +258,5 @@ export class IndexMaintenance implements IndexMaintenancePort {
 			await this.tables.dropTable(name);
 		}
 		this.manifest.invalidate();
-	}
-
-	/** Arrow rows carry typed arrays; LanceDB needs plain values to re-infer a schema. */
-	private toPlainRow(row: Record<string, unknown>): Record<string, unknown> {
-		const chunk = ChunkRepository.rowToChunk(row);
-		return {
-			id: row.id as string,
-			filePath: chunk.location.filePath,
-			startLine: chunk.location.startLine,
-			endLine: chunk.location.endLine,
-			type: chunk.type,
-			name: chunk.name,
-			content: chunk.content,
-			context: chunk.context,
-			hash: chunk.hash.toString(),
-			fileHash: chunk.fileVersion.toStored(),
-			vector: Array.from(row.vector as Iterable<number>),
-		};
 	}
 }

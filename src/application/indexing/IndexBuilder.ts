@@ -329,19 +329,22 @@ export class IndexBuilder {
 		chunks: Chunk[],
 		changedPaths: string[],
 	): Promise<Chunk[]> {
-		const existing = await this.deps.chunks.existingHashes(
-			chunks.map((c) => c.hash),
-		);
-		let candidates = chunks.filter((c) => !existing.has(c.hash.toString()));
-		const alreadyIndexed = chunks.length - candidates.length;
-
-		let oversized = 0;
-		const maxTokens = this.deps.config.maxTokens;
-		if (maxTokens) {
-			const before = candidates.length;
-			candidates = candidates.filter((c) => c.estimatedTokens() <= maxTokens);
-			oversized = before - candidates.length;
+		const { maxTokens, model, documentPrefix } = this.deps.config;
+		let candidates = maxTokens
+			? chunks.filter((c) => c.estimatedTokens() <= maxTokens)
+			: chunks;
+		const oversized = chunks.length - candidates.length;
+		if (maxTokens && model.startsWith("docker:")) {
+			candidates = candidates.flatMap((chunk) =>
+				chunk.splitByBytes(maxTokens, documentPrefix),
+			);
 		}
+		const existing = await this.deps.chunks.existingHashes(
+			candidates.map((c) => c.hash),
+		);
+		const before = candidates.length;
+		candidates = candidates.filter((c) => !existing.has(c.hash.toString()));
+		const alreadyIndexed = before - candidates.length;
 
 		this.deps.logger.info(
 			`${changedPaths.length} files changed, ${chunks.length} chunks total, ` +

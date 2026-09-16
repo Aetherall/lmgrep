@@ -1,5 +1,5 @@
-import type { CodeLocation } from "./CodeLocation.js";
-import type { ContentHash } from "./ContentHash.js";
+import { CodeLocation } from "./CodeLocation.js";
+import { ContentHash } from "./ContentHash.js";
 import { FileVersion } from "./FileVersion.js";
 
 /** Everything needed to build a Chunk, so callers never mis-order positionals. */
@@ -66,6 +66,53 @@ export class Chunk {
 		return Math.ceil(
 			(this.context.length + this.content.length) / Chunk.CHARS_PER_TOKEN,
 		);
+	}
+
+	splitByBytes(maxBytes: number, documentPrefix = ""): Chunk[] {
+		const overhead = Buffer.byteLength(`${documentPrefix}${this.context}\n`);
+		if (overhead + Buffer.byteLength(this.content) <= maxBytes) return [this];
+		const budget = maxBytes - overhead;
+		if (budget < 4)
+			throw new Error(
+				`Embedding context exceeds the byte budget for ${this.location}`,
+			);
+		const parts: Chunk[] = [];
+		let content = "";
+		let bytes = 0;
+		let startLine = this.location.startLine;
+		let line = startLine;
+		const emit = () => {
+			parts.push(
+				new Chunk({
+					location: new CodeLocation(
+						this.location.filePath,
+						startLine,
+						Math.min(
+							this.location.endLine,
+							content.endsWith("\n") ? line - 1 : line,
+						),
+					),
+					type: this.type,
+					name: this.name,
+					content,
+					context: this.context,
+					hash: ContentHash.of(content),
+					fileVersion: this.fileVersion,
+				}),
+			);
+			content = "";
+			bytes = 0;
+			startLine = line;
+		};
+		for (const character of this.content) {
+			const size = Buffer.byteLength(character);
+			if (bytes + size > budget) emit();
+			content += character;
+			bytes += size;
+			if (character === "\n") line++;
+		}
+		if (content) emit();
+		return parts;
 	}
 
 	/** The same chunk stamped with the file version it was produced from. */
