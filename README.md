@@ -195,6 +195,41 @@ Each embedding model gets its own subdirectory. Changing `model` in your config
 selects a different database rather than invalidating the one you have, so
 trying another model costs one re-index and switching back costs nothing.
 
+### Docker model aliases and verified indexes
+
+For Docker Model Runner, lmgrep resolves the configured name through the runner's
+`/models` catalog and records its immutable artifact digest, configured dimensions,
+and query/document prefixes in `lmgrep.json`. Those values identify the index;
+repository names and tags do not. Two aliases for the same artifact and settings
+reuse one index, and embedding requests use the resolved digest so a retag during
+indexing cannot silently change the model. Different artifacts or prefix settings
+get separate indexes. Other providers retain their existing name-based lookup.
+
+The digest identifies the complete Docker artifact, not just its weights.
+Repackaged artifacts with different digests are kept separate even when their
+model names, architecture, quantization, or reported dimensions match. The runner
+must be reachable to verify identity; an unavailable catalog or missing alias
+produces an explicit error, not a guessed match.
+
+Existing directories with a matching recorded embedding profile are reused in
+place. Legacy indexes containing only a model name and dimensions are preserved,
+but cannot be automatically certified: their original artifact and prefixes are
+unknown. `lmgrep index` creates a separate verified index; it does not rename,
+delete, or silently relabel the legacy one. An explicit path cannot bypass a
+profile mismatch. Imports into verified indexes also require matching profiles.
+
+The live integration test uses a temporary corpus and the real Docker embedding
+endpoint (no existing indexes are modified):
+
+```sh
+pnpm build
+LMGREP_TEST_DOCKER_MODEL=docker:docker.io/ai/text-embedding-qwen3-embedding-4b:q4_k_m-ctx8k \\
+  node --test test/docker-identity-live.test.mjs
+```
+
+Set `LMGREP_TEST_DOCKER_URL` if the runner is not at
+`http://localhost:12434/engines/v1`. Without a model variable, this test is skipped.
+
 ### Changing your embedding model
 
 The new model has no index yet, so lmgrep says so and names what you already

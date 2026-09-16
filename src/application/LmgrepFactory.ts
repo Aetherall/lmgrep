@@ -6,6 +6,7 @@ import { ModelIdentity } from "../domain/project/ModelIdentity.js";
 import { ProjectLocator } from "../domain/project/ProjectLocator.js";
 import { AiSdkChatModel } from "../infrastructure/ai/AiSdkChatModel.js";
 import { AiSdkEmbedder } from "../infrastructure/ai/AiSdkEmbedder.js";
+import { DockerModelIdentityResolver } from "../infrastructure/ai/DockerModelIdentityResolver.js";
 import { LocalModelReloader } from "../infrastructure/ai/LocalModelReloader.js";
 import { ConfigLoader } from "../infrastructure/fs/ConfigLoader.js";
 import { DatabaseLocks } from "../infrastructure/fs/DatabaseLocks.js";
@@ -14,6 +15,7 @@ import { ProjectIndexes } from "../infrastructure/fs/ProjectIndexes.js";
 import { ProjectMetadataStore } from "../infrastructure/fs/ProjectMetadataStore.js";
 import { ProjectRegistry } from "../infrastructure/fs/ProjectRegistry.js";
 import { StateDirectory } from "../infrastructure/fs/StateDirectory.js";
+import { VerifiedIndexPath } from "../infrastructure/fs/VerifiedIndexPath.js";
 import { Workspace } from "../infrastructure/fs/Workspace.js";
 import { GitClient } from "../infrastructure/git/GitClient.js";
 import { ChunkRepository } from "../infrastructure/lancedb/ChunkRepository.js";
@@ -62,6 +64,20 @@ export interface LmgrepOptions {
  * dependency direction one-way.
  */
 export class LmgrepFactory {
+	async locate(config: LmgrepConfig) {
+		const profile = await new DockerModelIdentityResolver().resolve(config);
+		const locator = new ProjectLocator(
+			new GitClient(),
+			new StateDirectory(),
+			ModelIdentity.of(config.model),
+			config.dimensions,
+			profile
+				? new VerifiedIndexPath(profile, new ProjectMetadataStore())
+				: undefined,
+		);
+		return { locator, profile };
+	}
+
 	async open(options: LmgrepOptions): Promise<Lmgrep> {
 		const { cwd } = options;
 		const logger = options.logger ?? new ConsoleLogger();
@@ -75,16 +91,30 @@ export class LmgrepFactory {
 
 		const state = new StateDirectory();
 		const git = new GitClient();
-		// The model partitions the databases, so it has to be known before a
-		// location can be resolved — which is why config loads first.
-		const locator = new ProjectLocator(
-			git,
-			state,
-			ModelIdentity.of(config.model),
-			config.dimensions,
-		);
+		const { locator, profile } = await this.locate(config);
 		const location = locator.resolveDatabase(cwd, options.database);
 		const metadata = new ProjectMetadataStore();
+		const verifyMetadata = () => {
+			const existing = metadata.read(location.path);
+			if (
+				existing?.embeddingProfile &&
+				!profile?.equals(existing.embeddingProfile)
+			) {
+				throw new Error(
+					`Embedding model or settings do not match the index at ${location.path}. Existing index was not changed.`,
+				);
+			}
+			if (
+				profile &&
+				metadata.holdsIndex(location.path) &&
+				!existing?.embeddingProfile
+			) {
+				throw new Error(
+					`Cannot verify the artifact and embedding settings of legacy index at ${location.path}. Use a new index instead; the legacy index is preserved.`,
+				);
+			}
+		};
+		verifyMetadata();
 		const registry = new ProjectRegistry(state);
 		const alternatives = new IndexAlternatives(
 			new ProjectIndexes(metadata),
@@ -104,7 +134,11 @@ export class LmgrepFactory {
 		const chunks = new ChunkRepository(tables, manifest, location.branch);
 		const maintenance = new IndexMaintenance(tables, manifest);
 
-		const embedder = options.embedder ?? new AiSdkEmbedder(config);
+		const embedder =
+			options.embedder ??
+			new AiSdkEmbedder(
+				profile ? { ...config, model: profile.data.artifact } : config,
+			);
 		const chunker = options.chunker ?? new TreeSitterChunker();
 		const workspace = new Workspace();
 		const reloader = new LocalModelReloader(config);
@@ -125,6 +159,7 @@ export class LmgrepFactory {
 			location,
 			locks,
 			recordMetadata: (dimensions) => {
+				verifyMetadata();
 				const project = locator.resolveProject(cwd);
 				metadata.write(location.path, {
 					root: project.root,
@@ -132,6 +167,7 @@ export class LmgrepFactory {
 					branch: location.branch.toString(),
 					model: config.model,
 					dimensions,
+					embeddingProfile: profile?.data,
 				});
 			},
 			// The sidecar says what this database is; the registry says that
@@ -167,6 +203,7 @@ export class LmgrepFactory {
 			logger,
 			() => metadata.read(location.path),
 			alternatives,
+			profile,
 		);
 
 		const services: LmgrepServices = {

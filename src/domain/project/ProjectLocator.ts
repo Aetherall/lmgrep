@@ -1,5 +1,6 @@
 import { dirname, join, resolve } from "node:path";
 import type { GitPort } from "../ports/GitPort.js";
+import type { IndexPathPort } from "../ports/IndexPathPort.js";
 import type { StateDirectoryPort } from "../ports/StateDirectoryPort.js";
 import { Branch } from "./Branch.js";
 import { DatabaseLocation } from "./DatabaseLocation.js";
@@ -50,6 +51,7 @@ export class ProjectLocator {
 		private readonly model: ModelIdentity,
 		/** Configured output width, when the model has a configurable one. */
 		private readonly dimensions?: number,
+		private readonly indexPath?: IndexPathPort,
 	) {}
 
 	/**
@@ -91,7 +93,8 @@ export class ProjectLocator {
 
 	/** Database directory for the project containing `cwd`. */
 	databasePathFor(cwd: string): string {
-		return join(this.indexHomeFor(cwd), this.modelSlug());
+		const home = this.indexHomeFor(cwd);
+		return this.indexPath?.resolve(home) ?? join(home, this.modelSlug());
 	}
 
 	/**
@@ -147,13 +150,13 @@ export class ProjectLocator {
 	 */
 	resolveDatabase(cwd: string, database?: string): DatabaseLocation {
 		if (database && database.length > 0) {
+			const home = join(
+				this.state.databasesDirectory(),
+				database.replace(/[^a-zA-Z0-9_.-]/g, "_"),
+			);
 			const path = this.isPathLike(database)
 				? resolve(cwd, database)
-				: join(
-						this.state.databasesDirectory(),
-						database.replace(/[^a-zA-Z0-9_.-]/g, "_"),
-						this.modelSlug(),
-					);
+				: (this.indexPath?.resolve(home) ?? join(home, this.modelSlug()));
 			return new DatabaseLocation(path, Branch.default(), resolve(cwd), true);
 		}
 

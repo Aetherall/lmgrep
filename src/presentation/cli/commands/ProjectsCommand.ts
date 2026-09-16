@@ -2,6 +2,7 @@ import { cpSync, existsSync, mkdirSync, renameSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
 import { createInterface } from "node:readline";
 import type { Command } from "commander";
+import { LmgrepFactory } from "../../../application/LmgrepFactory.js";
 import {
 	IndexInventory,
 	type InventoryEntry,
@@ -150,7 +151,13 @@ export class ProjectsCommand {
 		options: { force?: boolean },
 	): Promise<void> {
 		const { renderer } = this.context;
-		const path = database ?? this.locator().databasePathFor(this.context.cwd);
+		const path =
+			database ??
+			(
+				await new LmgrepFactory().locate(
+					new ConfigLoader().load(this.context.cwd),
+				)
+			).locator.databasePathFor(this.context.cwd);
 
 		if (!existsSync(path)) {
 			renderer.line(`No index at ${path}`);

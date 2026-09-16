@@ -51,6 +51,9 @@ export class ProjectMetadataStore implements IndexMetadataPort {
 			indexedAt: new Date().toISOString(),
 			model: existing?.model ?? metadata.model,
 			dimensions: existing?.dimensions ?? metadata.dimensions,
+			embeddingProfile: existing
+				? existing.embeddingProfile
+				: metadata.embeddingProfile,
 		};
 		writeFileSync(
 			join(databasePath, ProjectMetadataStore.FILE),

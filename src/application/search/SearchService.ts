@@ -2,6 +2,7 @@ import type { LmgrepConfig } from "../../domain/config/LmgrepConfig.js";
 import type { Vector } from "../../domain/corpus/Vector.js";
 import type { EmbedderPort } from "../../domain/ports/EmbedderPort.js";
 import type { LoggerPort } from "../../domain/ports/LoggerPort.js";
+import type { EmbeddingProfile } from "../../domain/project/EmbeddingProfile.js";
 import type { IndexMetadata } from "../../domain/project/IndexMetadata.js";
 import { ModelIdentity } from "../../domain/project/ModelIdentity.js";
 import { HitList } from "../../domain/retrieval/HitList.js";
@@ -32,6 +33,7 @@ export class SearchService {
 		private readonly logger: LoggerPort,
 		private readonly readMetadata: () => IndexMetadata | undefined,
 		private readonly alternatives: IndexAlternatives,
+		private readonly profile?: EmbeddingProfile,
 	) {}
 
 	async search(query: string, criteria: SearchCriteria): Promise<HitList> {
@@ -120,6 +122,13 @@ export class SearchService {
 					`your model produces ${queryVector.dimensions}-dim. ` +
 					"These embeddings are incompatible.",
 			);
+		}
+
+		if (meta.embeddingProfile) {
+			if (!this.profile?.equals(meta.embeddingProfile)) {
+				throw new Error("Embedding model or settings do not match the index.");
+			}
+			return;
 		}
 
 		if (!meta.model) return;

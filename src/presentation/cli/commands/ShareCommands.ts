@@ -1,14 +1,14 @@
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import type { Command } from "commander";
+import { LmgrepFactory } from "../../../application/LmgrepFactory.js";
 import type { Branch } from "../../../domain/project/Branch.js";
+import { EmbeddingProfile } from "../../../domain/project/EmbeddingProfile.js";
 import type { IndexMetadata } from "../../../domain/project/IndexMetadata.js";
 import { ModelIdentity } from "../../../domain/project/ModelIdentity.js";
-import { ProjectLocator } from "../../../domain/project/ProjectLocator.js";
+import type { ProjectLocator } from "../../../domain/project/ProjectLocator.js";
 import { ConfigLoader } from "../../../infrastructure/fs/ConfigLoader.js";
 import { ProjectMetadataStore } from "../../../infrastructure/fs/ProjectMetadataStore.js";
-import { StateDirectory } from "../../../infrastructure/fs/StateDirectory.js";
-import { GitClient } from "../../../infrastructure/git/GitClient.js";
 import { DatabaseImporter } from "../../../infrastructure/lancedb/DatabaseImporter.js";
 import { LanceTables } from "../../../infrastructure/lancedb/LanceTables.js";
 import { RowReplication } from "../../../infrastructure/lancedb/RowReplication.js";
@@ -49,7 +49,7 @@ export class ShareCommands {
 
 	private async runExport(): Promise<void> {
 		const { renderer } = this.context;
-		const { branch, location, metadata } = this.resolve();
+		const { branch, location, metadata } = await this.resolve();
 		const tables = new LanceTables(location, branch);
 		const share = new IndexShare(new RowReplication(tables, branch));
 
@@ -100,7 +100,7 @@ export class ShareCommands {
 		renderer.line("Connecting to peer...");
 		const lmgrep = await this.context.open({});
 		if (options.reset) await lmgrep.maintenance.reset();
-		const { branch, location, metadata } = this.resolve();
+		const { branch, location, metadata, store } = await this.resolve();
 		await lmgrep.close();
 
 		const tables = new LanceTables(location, branch);
@@ -109,12 +109,15 @@ export class ShareCommands {
 		const result = await share.receive(code, metadata, {
 			onProgress: (received, total) =>
 				process.stderr.write(`\rReceiving: ${received}/${total} chunks`),
-			onMeta: (meta) =>
+			onMeta: (meta) => {
+				if (metadata?.embeddingProfile)
+					store.write(location, { ...metadata, dimensions: meta.dimensions });
 				renderer.line(
 					`Peer index: ${meta.chunkCount} chunks` +
 						(meta.model ? `, model: ${meta.model}` : "") +
 						(meta.dimensions ? `, ${meta.dimensions} dims` : ""),
-				),
+				);
+			},
 			onWarning: (message) => renderer.error(message),
 		});
 		process.stderr.write("\n");
@@ -130,7 +133,7 @@ export class ShareCommands {
 	): Promise<void> {
 		const { renderer } = this.context;
 		const cwd = this.context.cwd;
-		const { branch, location, store } = this.resolve();
+		const { branch, location, store, metadata } = await this.resolve();
 
 		const sourcePath = resolve(cwd, source);
 
@@ -141,9 +144,27 @@ export class ShareCommands {
 			throw new Error("Source and destination are the same database.");
 		}
 
+		const sourceMeta = store.read(sourcePath);
+		if (
+			metadata?.embeddingProfile &&
+			(!sourceMeta?.embeddingProfile ||
+				!new EmbeddingProfile(metadata.embeddingProfile).equals(
+					sourceMeta.embeddingProfile,
+				))
+		) {
+			throw new Error(
+				"Source index has no matching verified embedding profile; import refused.",
+			);
+		}
 		const lmgrep = await this.context.open({});
 		if (options.reset) await lmgrep.maintenance.reset();
 		await lmgrep.close();
+		if (sourceMeta)
+			store.write(location, {
+				...sourceMeta,
+				root: cwd,
+				branch: branch.toString(),
+			});
 
 		const tables = new LanceTables(location, branch);
 		const { chunks, files } = await new DatabaseImporter(
@@ -158,7 +179,6 @@ export class ShareCommands {
 
 		// The source's model is what these vectors mean; without a matching
 		// local model the import is unusable, so say so explicitly.
-		const sourceMeta = store.read(sourcePath);
 		if (sourceMeta?.model) {
 			const family = ModelIdentity.of(sourceMeta.model).family;
 			renderer.line(
@@ -172,22 +192,27 @@ export class ShareCommands {
 	}
 
 	/** The pieces every share operation needs, resolved from the cwd. */
-	private resolve(): ShareTarget {
-		const state = new StateDirectory();
+	private async resolve(): Promise<ShareTarget> {
 		const config = new ConfigLoader().load(this.context.cwd);
-		const locator = new ProjectLocator(
-			new GitClient(),
-			state,
-			ModelIdentity.of(config.model),
-			config.dimensions,
-		);
+		const { locator, profile } = await new LmgrepFactory().locate(config);
 		const store = new ProjectMetadataStore();
 		const database = locator.resolveDatabase(this.context.cwd);
 		return {
 			locator,
 			branch: database.branch,
 			location: database.path,
-			metadata: store.read(database.path),
+			metadata:
+				store.read(database.path) ??
+				(profile
+					? {
+							root: database.root,
+							branch: database.branch.toString(),
+							indexedAt: new Date().toISOString(),
+							model: config.model,
+							dimensions: config.dimensions,
+							embeddingProfile: profile.data,
+						}
+					: undefined),
 			store,
 		};
 	}

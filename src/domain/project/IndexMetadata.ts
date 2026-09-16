@@ -1,3 +1,5 @@
+import type { EmbeddingProfileData } from "./EmbeddingProfile.js";
+
 /**
  * What an index records about itself: where it came from and how it was built.
  *
@@ -14,4 +16,5 @@ export interface IndexMetadata {
 	model?: string;
 	/** Embedding vector dimensions. */
 	dimensions?: number;
+	embeddingProfile?: EmbeddingProfileData;
 }

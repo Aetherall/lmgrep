@@ -1,24 +1,15 @@
 import { createHash } from "node:crypto";
 
 /**
- * A model string in `provider:model` form, the family comparison that decides
- * whether two models produce interchangeable embeddings, and the directory
- * slug derived from it.
+ * A model reference and the historical name-based family and directory slug.
  *
- * Only the family matters: a re-quantized or re-tagged build of the same model
- * produces compatible embeddings, and so does the same model served by a
- * different runtime, so comparing raw strings would partition on differences
- * that do not exist.
- *
- * The slug is the load-bearing part. Databases are stored per model, so
- * {@link toSlug} draws the boundary between them — and it must draw it in
- * exactly the same place as {@link isSameFamilyAs}. Two models share a
- * database if and only if they are compatible; a slug that split more finely
- * would re-embed a corpus for nothing, and one that split more coarsely would
- * mix incomparable vectors into one table.
+ * Family names remain useful for display, runtime discovery, legacy indexes,
+ * and providers without artifact resolution. They are not proof of embedding
+ * compatibility. Docker index selection uses a verified EmbeddingProfile
+ * instead, including the artifact digest and embedding settings.
  */
 export class ModelIdentity {
-	/** Quantization and tag suffixes that do not change the embedding space. */
+	/** Variant suffixes ignored by historical name-based lookup. */
 	private static readonly VARIANT_SUFFIX =
 		/^(Q\d|q\d|fp\d|f\d|latest|gguf|ggml)/i;
 
@@ -66,7 +57,7 @@ export class ModelIdentity {
 		);
 	}
 
-	/** Whether two models produce interchangeable embeddings. */
+	/** Whether two model references share the historical family name. */
 	isSameFamilyAs(other: ModelIdentity): boolean {
 		return this.family === other.family;
 	}

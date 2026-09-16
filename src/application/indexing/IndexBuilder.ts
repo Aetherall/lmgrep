@@ -94,6 +94,7 @@ export class IndexBuilder {
 		options: IndexBuildOptions,
 	): Promise<IndexBuildResult> {
 		const { logger } = this.deps;
+		if (!options.dry) this.deps.recordMetadata(undefined);
 
 		if (options.reset) {
 			logger.info("Resetting index...");

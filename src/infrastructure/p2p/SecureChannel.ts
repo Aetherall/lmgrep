@@ -1,4 +1,5 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import type { EmbeddingProfileData } from "../../domain/project/EmbeddingProfile.js";
 
 /** Messages exchanged during a share. */
 export type ShareMessage =
@@ -6,6 +7,7 @@ export type ShareMessage =
 			type: "meta";
 			model?: string;
 			dimensions?: number;
+			embeddingProfile?: EmbeddingProfileData;
 			chunkCount: number;
 			branch: string;
 			remote?: string;

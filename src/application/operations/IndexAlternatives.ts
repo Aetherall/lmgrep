@@ -55,6 +55,14 @@ export class IndexAlternatives {
 		const previous = named[0] ?? others[0];
 		const configured = ModelIdentity.of(this.config.model).family;
 
+		if (this.config.model.startsWith("docker:")) {
+			return {
+				reason: `No verified index matches the Docker artifact and embedding settings for "${this.config.model}". Existing indexes: ${this.describe(named)}.`,
+				fix: "Names alone do not prove compatibility. Legacy indexes without a recorded artifact and prefix settings cannot be verified automatically. Run `lmgrep index` to create a verified index; existing indexes are kept.",
+				others,
+			};
+		}
+
 		return {
 			reason:
 				`This project has no index for "${configured}" — but it is indexed ` +

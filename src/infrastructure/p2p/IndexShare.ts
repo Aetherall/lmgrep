@@ -1,3 +1,7 @@
+import {
+	EmbeddingProfile,
+	type EmbeddingProfileData,
+} from "../../domain/project/EmbeddingProfile.js";
 import type { IndexMetadata } from "../../domain/project/IndexMetadata.js";
 import { ModelIdentity } from "../../domain/project/ModelIdentity.js";
 import type { RowReplication } from "../lancedb/RowReplication.js";
@@ -69,6 +73,7 @@ export class IndexShare {
 						type: "meta",
 						model: metadata?.model,
 						dimensions: metadata?.dimensions,
+						embeddingProfile: metadata?.embeddingProfile,
 						chunkCount,
 						branch: metadata?.branch ?? "main",
 						remote: metadata?.remote,
@@ -142,17 +147,17 @@ export class IndexShare {
 					switch (message.type) {
 						case "meta": {
 							expected = message.chunkCount;
+							this.warnOnModelMismatch(
+								localMetadata,
+								message,
+								options.onWarning,
+							);
 							options.onMeta?.({
 								model: message.model,
 								dimensions: message.dimensions,
 								chunkCount: message.chunkCount,
 								remote: message.remote,
 							});
-							this.warnOnModelMismatch(
-								localMetadata,
-								message,
-								options.onWarning,
-							);
 							channel.send(socket, { type: "ready" });
 							accepted = true;
 							break;
@@ -196,9 +201,29 @@ export class IndexShare {
 
 	private warnOnModelMismatch(
 		local: IndexMetadata | undefined,
-		remote: { model?: string; dimensions?: number },
+		remote: {
+			model?: string;
+			dimensions?: number;
+			embeddingProfile?: EmbeddingProfileData;
+		},
 		onWarning?: (message: string) => void,
 	): void {
+		if (local?.embeddingProfile || remote.embeddingProfile) {
+			if (
+				!local?.embeddingProfile ||
+				!remote.embeddingProfile ||
+				!new EmbeddingProfile(local.embeddingProfile).equals(
+					remote.embeddingProfile,
+				) ||
+				(local.dimensions !== undefined &&
+					local.dimensions !== remote.dimensions)
+			) {
+				throw new Error(
+					"Source and destination embedding profiles do not match; import refused.",
+				);
+			}
+			return;
+		}
 		if (!local?.model || !remote.model) return;
 		const localFamily = ModelIdentity.of(local.model).family;
 		const remoteFamily = ModelIdentity.of(remote.model).family;
