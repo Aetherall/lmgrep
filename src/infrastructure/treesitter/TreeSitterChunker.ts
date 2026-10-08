@@ -13,14 +13,12 @@ import { SlidingWindowChunker } from "./SlidingWindowChunker.js";
 /**
  * Splits source into chunks along AST boundaries.
  *
- * Node-bounded chunks are what make results readable: a hit is a whole
- * function or class, not an arbitrary window through the middle of one. Files
- * with no grammar, or no chunkable structure, fall back to a sliding window.
+ * Functions and methods are isolated from enclosing declarations and state.
+ * Files with no grammar, or no chunkable structure, fall back to a sliding
+ * window.
  */
 export class TreeSitterChunker implements ChunkerPort {
-	/** Chunks larger than this are split by recursing into their children. */
 	private static readonly MAX_CHUNK_TOKENS = 8192;
-	/** A one-line fragment shorter than this is noise, not a unit of code. */
 	private static readonly MIN_CHUNK_CHARS = 50;
 
 	private parser: Parser | undefined;
@@ -50,12 +48,51 @@ export class TreeSitterChunker implements ChunkerPort {
 		const tree = parser.parse(source);
 		if (!tree) return this.fallback.chunk(filePath, cwd);
 
-		const chunks =
-			language.id === "markdown"
-				? this.chunkMarkdown(tree.rootNode, filePath, source)
-				: this.collect(tree.rootNode, language, filePath, source, []);
-
-		return chunks.length > 0 ? chunks : this.fallback.chunk(filePath, cwd);
+		try {
+			if (language.id === "markdown") {
+				return this.chunkMarkdown(tree.rootNode, filePath, source);
+			}
+			const spans: Array<{ node: Node; start: number; end: number }> = [];
+			for (const node of tree.rootNode.namedChildren) {
+				const before = spans.length;
+				this.collect(node, language, spans);
+				if (!this.isContextOnly(node, language)) {
+					const covered = spans.slice(before).sort((a, b) => a.start - b.start);
+					let cursor = node.startIndex;
+					for (const span of covered) {
+						this.addSpan(node, cursor, span.start, spans);
+						cursor = Math.max(cursor, span.end);
+					}
+					this.addSpan(node, cursor, node.endIndex, spans);
+				}
+			}
+			const chunks = spans
+				.sort((a, b) => a.start - b.start)
+				.map(({ node, start, end }) => {
+					const content = source.slice(start, end);
+					const scope = this.context.extractScope(node, language);
+					const name = this.nodeName(node);
+					const qualifiedName = name
+						? [...scope.map((entry) => entry.name), name].join(".")
+						: `lines_${source.slice(0, start).split("\n").length}`;
+					return new Chunk({
+						location: new CodeLocation(
+							filePath,
+							source.slice(0, start).split("\n").length,
+							source.slice(0, end).split("\n").length -
+								(content.endsWith("\n") ? 1 : 0),
+						),
+						type: language.chunkTypes.includes(node.type) ? node.type : "block",
+						name: qualifiedName,
+						content,
+						context: `${this.context.build(node, filePath, source, language)}\n[symbol: ${qualifiedName}]`,
+						hash: ContentHash.of(content),
+					});
+				});
+			return chunks.length > 0 ? chunks : this.fallback.chunk(filePath, cwd);
+		} finally {
+			tree.delete();
+		}
 	}
 
 	/**
@@ -105,77 +142,161 @@ export class TreeSitterChunker implements ChunkerPort {
 	private collect(
 		node: Node,
 		language: LanguageConfig,
-		filePath: string,
-		source: string,
-		chunks: Chunk[],
-	): Chunk[] {
+		spans: Array<{ node: Node; start: number; end: number }>,
+		start = node.startIndex,
+		end = node.endIndex,
+	): void {
+		if (
+			node.type === "export_statement" ||
+			node.type === "decorated_definition"
+		) {
+			const declaration =
+				node.childForFieldName("declaration") ??
+				node.childForFieldName("definition");
+			if (declaration) {
+				this.collect(declaration, language, spans, start, end);
+				return;
+			}
+		}
+		if (node.type === "variable_declarator") {
+			const value = node.childForFieldName("value");
+			if (value?.type === "arrow_function") {
+				this.collect(value, language, spans, start, end);
+				return;
+			}
+		}
 		if (!language.chunkTypes.includes(node.type)) {
-			for (const child of node.children) {
-				this.collect(child, language, filePath, source, chunks);
+			const children = node.namedChildren;
+			if (
+				(node.type === "lexical_declaration" ||
+					node.type === "variable_declaration") &&
+				children.length === 1
+			) {
+				this.collect(children[0], language, spans, start, end);
+			} else {
+				for (const child of children) this.collect(child, language, spans);
 			}
-			return chunks;
+			return;
 		}
-
-		const content = node.text;
-
-		// Too large to embed whole: descend instead, so a big class becomes its
-		// methods rather than being truncated or skipped.
-		const estimatedTokens = Math.ceil(content.length / 4);
-		if (
-			estimatedTokens > TreeSitterChunker.MAX_CHUNK_TOKENS &&
-			this.hasChunkableDescendants(node, language)
-		) {
-			for (const child of node.children) {
-				this.collect(child, language, filePath, source, chunks);
+		const split =
+			(language.scopeTypes.includes(node.type) ||
+				Math.ceil(node.text.length / 4) > TreeSitterChunker.MAX_CHUNK_TOKENS) &&
+			this.hasChunkableDescendants(node, language);
+		if (split) {
+			const before = spans.length;
+			for (const child of node.namedChildren)
+				this.collect(child, language, spans);
+			const children = spans.slice(before).sort((a, b) => a.start - b.start);
+			let cursor = start;
+			for (const child of children) {
+				this.addSpan(node, cursor, child.start, spans);
+				cursor = child.end;
 			}
-			return chunks;
+			this.addSpan(node, cursor, end, spans);
+			return;
 		}
-
-		// A short one-liner carries no retrievable meaning on its own.
+		const name = this.nodeName(node);
 		if (
-			content.split("\n").length < 2 &&
-			content.length < TreeSitterChunker.MIN_CHUNK_CHARS
+			!name &&
+			!node.text.includes("\n") &&
+			node.text.length < TreeSitterChunker.MIN_CHUNK_CHARS
 		) {
-			return chunks;
+			return;
 		}
+		if (node.type === "arrow_function") {
+			if (this.testName(node)) {
+				const call = node.parent?.parent;
+				if (call) {
+					start = call.startIndex;
+					end = call.endIndex;
+				}
+			} else if (node.parent?.type === "public_field_definition") {
+				start = node.parent.startIndex;
+				end = node.parent.endIndex;
+			}
+		}
+		spans.push({ node, start, end });
+	}
 
-		chunks.push(
-			new Chunk({
-				location: new CodeLocation(
-					filePath,
-					node.startPosition.row + 1,
-					node.endPosition.row + 1,
-				),
-				type: node.type,
-				name: this.nodeName(node) ?? `anonymous_${node.startPosition.row}`,
-				content,
-				context: this.context.build(node, filePath, source, language),
-				hash: ContentHash.of(content),
-			}),
+	private addSpan(
+		node: Node,
+		start: number,
+		end: number,
+		spans: Array<{ node: Node; start: number; end: number }>,
+	): void {
+		let enclosing = node;
+		while (
+			enclosing.parent &&
+			(start < enclosing.startIndex || end > enclosing.endIndex)
+		) {
+			enclosing = enclosing.parent;
+		}
+		const content = enclosing.text.slice(
+			start - enclosing.startIndex,
+			end - enclosing.startIndex,
 		);
-		return chunks;
+		const meaningful = content
+			.replace(/\/\*[\s\S]*?\*\//g, "")
+			.replace(/(?:\/\/|#|--)[^\n]*/g, "");
+		if (/[\p{L}\p{N}_]/u.test(meaningful)) {
+			spans.push({
+				node,
+				start: start + content.length - content.trimStart().length,
+				end: end - content.length + content.trimEnd().length,
+			});
+		}
+	}
+
+	private isContextOnly(node: Node, language: LanguageConfig): boolean {
+		return (
+			node.type === "comment" ||
+			(language.importTypes.includes(node.type) &&
+				!["call_expression", "call", "command"].includes(node.type))
+		);
 	}
 
 	private hasChunkableDescendants(
 		node: Node,
 		language: LanguageConfig,
 	): boolean {
-		for (const child of node.children) {
-			if (language.chunkTypes.includes(child.type)) return true;
-			if (this.hasChunkableDescendants(child, language)) return true;
-		}
-		return false;
+		return node.namedChildren.some(
+			(child) =>
+				language.chunkTypes.includes(child.type) ||
+				this.hasChunkableDescendants(child, language),
+		);
+	}
+
+	private testName(node: Node): string | undefined {
+		const call = node.parent?.type === "arguments" ? node.parent.parent : null;
+		if (call?.type !== "call_expression") return undefined;
+		const callee = call.childForFieldName("function")?.text;
+		if (!callee || !/^(?:test|it)(?:\.(?:only|skip|todo))?$/.test(callee))
+			return undefined;
+		const label = node.parent?.namedChildren.find(
+			(child) => child.type === "string",
+		);
+		return label ? `${callee}: ${label.text.slice(1, -1)}` : undefined;
 	}
 
 	private nodeName(node: Node): string | undefined {
+		if (node.type === "arrow_function") {
+			return (
+				this.testName(node) ??
+				(node.parent &&
+				["variable_declarator", "public_field_definition"].includes(
+					node.parent.type,
+				)
+					? node.parent.childForFieldName("name")?.text
+					: undefined)
+			);
+		}
 		return (
 			node.childForFieldName("name") ??
 			node.children.find(
-				(c: Node) =>
-					c.type === "identifier" ||
-					c.type === "type_identifier" ||
-					// nix binds its target via an attrpath (e.g. `outputs = ...`)
-					c.type === "attrpath",
+				(child) =>
+					child.type === "identifier" ||
+					child.type === "type_identifier" ||
+					child.type === "attrpath",
 			)
 		)?.text;
 	}

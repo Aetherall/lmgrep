@@ -6,6 +6,7 @@ import type { TraceEntry } from "../../domain/research/ResearchTrace.js";
 import type { Hit } from "../../domain/retrieval/Hit.js";
 import { DiskUsage } from "../../infrastructure/fs/DiskUsage.js";
 import type { RunningProcess } from "../../infrastructure/process/ProcessRegistry.js";
+import { HitPresentation } from "../HitPresentation.js";
 
 /**
  * All terminal output for the CLI.
@@ -31,22 +32,10 @@ export class Renderer {
 		this.out(JSON.stringify(value, null, 2));
 	}
 
-	/**
-	 * Full result view: a ruled header, the context block, then the source.
-	 *
-	 * The score is always shown. It used to be behind `--scores`, which meant
-	 * the one number that says how much to trust a result was hidden by
-	 * default and cost a flag to see.
-	 */
 	hits(hits: readonly Hit[]): void {
 		for (const hit of hits) {
-			const score = ` (${hit.score.toFixed(3)})`;
 			this.out(`\n${"─".repeat(Renderer.RULE_WIDTH)}`);
-			this.out(`${hit.location} [${hit.type}] ${hit.name}${score}`);
-			this.rule();
-			this.out(hit.context);
-			this.out("");
-			this.out(hit.content);
+			this.out(HitPresentation.format(hit));
 		}
 	}
 

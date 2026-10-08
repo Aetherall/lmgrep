@@ -104,12 +104,22 @@ export class Chunk {
 			bytes = 0;
 			startLine = line;
 		};
-		for (const character of this.content) {
-			const size = Buffer.byteLength(character);
-			if (bytes + size > budget) emit();
-			content += character;
-			bytes += size;
-			if (character === "\n") line++;
+		for (const sourceLine of this.content.match(/[^\n]*\n|[^\n]+$/g) ?? []) {
+			const lineBytes = Buffer.byteLength(sourceLine);
+			if (bytes + lineBytes > budget && content) emit();
+			if (lineBytes <= budget) {
+				content += sourceLine;
+				bytes += lineBytes;
+				if (sourceLine.endsWith("\n")) line++;
+			} else {
+				for (const character of sourceLine) {
+					const size = Buffer.byteLength(character);
+					if (bytes + size > budget) emit();
+					content += character;
+					bytes += size;
+					if (character === "\n") line++;
+				}
+			}
 		}
 		if (content) emit();
 		return parts;

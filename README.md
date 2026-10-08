@@ -129,6 +129,26 @@ does not load all embedding vectors into JavaScript or drop the chunks table.
 --in <target>     Repeatable: a project directory, or a standalone index name
 ```
 
+Search output shows the source location, qualified symbol (for example,
+`SearchService.search`), a readable code kind, and numbered source. Scope and
+documentation appear without the embedding-only file/role headers. Each hit is
+limited to 80 output lines and 16,000 characters; any omitted lines or characters
+are explicitly reported with their location. `--json` retains the full indexed
+content, and `--compact` still prints only paths. Scores indicate ranking, not
+confidence that a result answers the query.
+
+Exported JavaScript/TypeScript declarations retain their actual kinds and names.
+Classes with chunkable members are separated into method chunks and declaration/
+state fragments, with enclosing scopes included in method embeddings. Short named
+declarations, test descriptions, and top-level executable statements are retained.
+Docker byte-budget splitting prefers complete lines when they fit; exceptionally
+long lines still require Unicode-safe splitting. Partially overlapping fragments
+are kept when they contain complementary code.
+
+Existing indexes keep their old chunks until rebuilt. To apply the new chunking
+to unchanged files, run `lmgrep index --reset` when ready: it discards and rebuilds
+the selected index and invokes your embedding provider again.
+
 ### Index options
 
 ```

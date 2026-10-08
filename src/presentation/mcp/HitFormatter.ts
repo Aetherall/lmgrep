@@ -1,5 +1,6 @@
 import type { ResearchResult } from "../../application/research/ResearchAgent.js";
 import type { Hit } from "../../domain/retrieval/Hit.js";
+import { HitPresentation } from "../HitPresentation.js";
 
 /**
  * Renders results as the plain text an MCP client receives.
@@ -10,17 +11,7 @@ import type { Hit } from "../../domain/retrieval/Hit.js";
  */
 export class HitFormatter {
 	static hits(hits: readonly Hit[]): string {
-		return hits
-			.map((hit) => {
-				const header =
-					`${hit.location} [${hit.type}] ${hit.name} ` +
-					`(score: ${hit.score.toFixed(3)})`;
-				const parts = [header];
-				if (hit.context) parts.push(hit.context);
-				parts.push(hit.content);
-				return parts.join("\n");
-			})
-			.join("\n\n---\n\n");
+		return hits.map((hit) => HitPresentation.format(hit)).join("\n\n---\n\n");
 	}
 
 	static answer(result: ResearchResult): string {

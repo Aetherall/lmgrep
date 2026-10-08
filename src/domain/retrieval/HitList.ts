@@ -34,19 +34,9 @@ export class HitList {
 		return this.hits[Symbol.iterator]();
 	}
 
-	/**
-	 * Drop redundant rows, keeping the first (highest-scoring) of each group:
-	 *
-	 *  1. Exact duplicates by chunk id — identical rows produced by concurrent
-	 *     unlocked indexing.
-	 *  2. Overlapping line ranges within a file — the fallback chunker's
-	 *     sliding-window overlap, plus any parent/child or near-duplicate span.
-	 *     Tree-sitter chunks are node-bounded and never overlap, so this only
-	 *     ever removes genuine near-duplicates.
-	 */
 	deduplicated(): HitList {
 		const seenIds = new Set<string>();
-		const keptRanges = new Map<string, Array<[number, number]>>();
+		const keptByFile = new Map<string, Hit[]>();
 		const out: Hit[] = [];
 
 		for (const hit of this.hits) {
@@ -54,16 +44,16 @@ export class HitList {
 			seenIds.add(hit.id);
 
 			const { filePath, startLine, endLine } = hit.location;
-			const ranges = keptRanges.get(filePath);
-			if (ranges) {
-				const overlaps = ranges.some(
-					([s, e]) => startLine <= e && s <= endLine,
-				);
-				if (overlaps) continue;
-				ranges.push([startLine, endLine]);
-			} else {
-				keptRanges.set(filePath, [[startLine, endLine]]);
-			}
+			const kept = keptByFile.get(filePath) ?? [];
+			const redundant = kept.some(
+				(previous) =>
+					previous.location.startLine <= startLine &&
+					previous.location.endLine >= endLine &&
+					previous.content.includes(hit.content),
+			);
+			if (redundant) continue;
+			kept.push(hit);
+			keptByFile.set(filePath, kept);
 			out.push(hit);
 		}
 

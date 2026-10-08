@@ -66,7 +66,7 @@ export class ToolDescriptions {
 		'- "config loading and validation"',
 		'- "how to run the playwright tests" → finds config, scripts, prerequisites',
 		"",
-		"**lmgrep results include** file paths, line numbers, AST node types, and surrounding context (scope, leading comments, role) — often enough to act on directly without re-reading the file. Trust lmgrep results; don't follow up with Glob/Read on files already surfaced by lmgrep unless you genuinely need content that wasn't returned.",
+		"**lmgrep results include** file paths, qualified symbols, readable code kinds, numbered source, and surrounding scope/documentation. Long hits explicitly report omitted lines or characters; read the reported file range when you need the remainder. Scores are ranking signals, not confidence estimates.",
 		"",
 		"**Fall back to Grep only** when you need exact string or regex matches (specific identifiers, literal constants, error messages, TODO markers). Don't use Grep/Glob/find for conceptual or intent-based search — lmgrep will do better.",
 	].join("\n");

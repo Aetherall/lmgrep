@@ -71,3 +71,20 @@ test("fitting chunks keep identity and impossible context budgets fail explicitl
 		/context exceeds the byte budget/,
 	);
 });
+
+test("byte splitting prefers complete source lines when they fit the budget", () => {
+	const original = chunk(
+		"return firstValue;\nreturn secondValue;\nreturn thirdValue;\n",
+	);
+	const parts = original.splitByBytes(48);
+	assert.ok(parts.length > 1);
+	assert.equal(parts.map((part) => part.content).join(""), original.content);
+	assert.ok(parts.every((part) => part.content.endsWith("\n")));
+	assert.ok(parts.every((part) => part.content.startsWith("return ")));
+	for (let i = 1; i < parts.length; i++) {
+		assert.equal(
+			parts[i].location.startLine,
+			parts[i - 1].location.endLine + 1,
+		);
+	}
+});

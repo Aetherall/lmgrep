@@ -10,8 +10,7 @@ import type { ChunkerPort } from "../../domain/ports/ChunkerPort.js";
  * structure (a linear shell script, say).
  *
  * Windows overlap slightly so a passage straddling a boundary is still
- * retrievable. The overlap is kept small because search deduplicates
- * overlapping hits anyway, making a larger one pure index bloat.
+ * retrievable.
  */
 export class SlidingWindowChunker implements ChunkerPort {
 	private static readonly WINDOW_LINES = 50;
