@@ -10,8 +10,8 @@ import { HitPresentation } from "../HitPresentation.js";
  * the whole point of returning the source inline.
  */
 export class HitFormatter {
-	static hits(hits: readonly Hit[]): string {
-		return hits.map((hit) => HitPresentation.format(hit)).join("\n\n---\n\n");
+	static hits(hits: readonly Hit[], classContext = false): string {
+		return HitPresentation.cards(hits, classContext).join("\n\n---\n\n");
 	}
 
 	static answer(result: ResearchResult): string {

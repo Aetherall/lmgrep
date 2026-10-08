@@ -124,6 +124,7 @@ does not load all embedding vectors into JavaScript or drop the chunks table.
 --limit <n>       Max results (default: 25)
 --under <path>    Only search files under this path
 --language <exts> Only search these extensions (e.g. .ts,.py)
+--context         Show brief class declaration/state and documentation
 --compact         Print matching file paths only
 --json            Print results as JSON
 --in <target>     Repeatable: a project directory, or a standalone index name
@@ -136,6 +137,22 @@ limited to 80 output lines and 16,000 characters; any omitted lines or character
 are explicitly reported with their location. `--json` retains the full indexed
 content, and `--compact` still prints only paths. Scores indicate ranking, not
 confidence that a result answers the query.
+
+Text output groups hits with the same class scope, file and indexed version:
+the first (highest-ranked) hit is the primary snippet; lower-ranked bodies are
+not repeated. Groups stay in primary-hit order, with no method boosting or extra
+retrieval. Class snippets use a twelve-line source budget, including omission
+notices. If scope identity is missing or conflicting, hits remain
+separate. Locations for up to three other matching members remain visible by
+default, without repeating their bodies; additional matches are counted.
+
+Use `--context` (MCP: `classContext: true`) to add a brief declaration/state line
+and class documentation when a class fragment was also retrieved. This is
+context from the returned hits, not a complete class outline: no source files
+are read and no additional model calls are made. Related bodies are available
+via `--json` or the reported file locations. `--limit` still caps raw retrieved
+hits, so grouping may display fewer cards; JSON and compact-path output remain
+ungrouped and unchanged.
 
 Exported JavaScript/TypeScript declarations retain their actual kinds and names.
 Classes with chunkable members are separated into method chunks and declaration/

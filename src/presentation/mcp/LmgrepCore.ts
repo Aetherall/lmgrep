@@ -21,6 +21,7 @@ export interface SearchArgs {
 	type?: string[];
 	language?: string[];
 	project?: string;
+	classContext?: boolean;
 }
 
 export interface ToolResult {
@@ -152,7 +153,7 @@ export class LmgrepCore {
 
 			return hits.isEmpty
 				? { text: "No results found." }
-				: { text: HitFormatter.hits(hits.toArray()) };
+				: { text: HitFormatter.hits(hits.toArray(), args.classContext) };
 		});
 	}
 

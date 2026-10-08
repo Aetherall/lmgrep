@@ -7,6 +7,7 @@ interface SearchOptions extends GlobalOptions {
 	limit: string;
 	compact?: boolean;
 	json?: boolean;
+	context?: boolean;
 	under?: string;
 	language?: string;
 }
@@ -30,11 +31,19 @@ export class SearchCommand {
 			program
 				.command("search <query...>")
 				.description("Search the codebase using natural language")
-				.option("-m, --limit <n>", "Max results", "25")
+				.option(
+					"-m, --limit <n>",
+					"Max retrieved hits (grouping may display fewer snippets)",
+					"25",
+				)
 				.option("--under <path>", "Only search files under this path")
 				.option(
 					"--language <exts>",
 					"Only search these file extensions (comma-separated, e.g. .ts,.py)",
+				)
+				.option(
+					"--context",
+					"Show brief class declaration/state and documentation",
 				)
 				.option("--compact", "Print matching file paths only")
 				.option("--json", "Print results as JSON"),
@@ -66,7 +75,7 @@ export class SearchCommand {
 				renderer.hitPaths(hits.toArray());
 				return;
 			}
-			renderer.hits(hits.toArray());
+			renderer.hits(hits.toArray(), options.context);
 		});
 	}
 }

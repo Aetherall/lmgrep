@@ -285,7 +285,7 @@ test("multiple hits retain separation and compact paths and JSON are unchanged",
 	const before = JSON.stringify(value);
 	assert.equal(
 		HitFormatter.hits([value, value]),
-		`${HitPresentation.format(value)}\n\n---\n\n${HitPresentation.format(value)}`,
+		HitPresentation.format(value),
 	);
 	const output = [];
 	const renderer = new Renderer((line) => output.push(line));

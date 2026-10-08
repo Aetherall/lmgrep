@@ -11,8 +11,13 @@ export class ToolDescriptions {
 			description:
 				'Natural-language description of what you\'re looking for — phrase it as a question or intent, not keywords. Good: "how are webhooks authenticated", "where is user deletion handled", "what happens when a record is created". Bad: "webhook auth", "deleteUser", "createRecord".',
 		},
+		classContext: {
+			description:
+				"Include brief class declaration/state and documentation from retrieved hits; related member locations are always shown",
+		},
 		limit: {
-			description: "Maximum number of results",
+			description:
+				"Maximum retrieved hits; class grouping may display fewer primary snippets",
 			default: 5,
 		},
 		filePrefix: {
@@ -66,7 +71,7 @@ export class ToolDescriptions {
 		'- "config loading and validation"',
 		'- "how to run the playwright tests" → finds config, scripts, prerequisites',
 		"",
-		"**lmgrep results include** file paths, qualified symbols, readable code kinds, numbered source, and surrounding scope/documentation. Long hits explicitly report omitted lines or characters; read the reported file range when you need the remainder. Scores are ranking signals, not confidence estimates.",
+		"**lmgrep results include** file paths, qualified symbols, readable code kinds, numbered source, and up to three related matching member locations. Each class group shows its strongest retrieved snippet, without boosting methods; classContext adds brief declaration/state and documentation from retrieved hits only. Grouping may hide a lower-ranked relevant method body: read its reported location when needed. Long snippets explicitly report omitted lines or characters. Scores are ranking signals, not confidence estimates.",
 		"",
 		"**Fall back to Grep only** when you need exact string or regex matches (specific identifiers, literal constants, error messages, TODO markers). Don't use Grep/Glob/find for conceptual or intent-based search — lmgrep will do better.",
 	].join("\n");

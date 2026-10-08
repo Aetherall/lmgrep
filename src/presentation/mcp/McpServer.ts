@@ -42,6 +42,10 @@ export class LmgrepMcpServer {
 					.optional()
 					.default(params.limit.default)
 					.describe(params.limit.description),
+				classContext: z
+					.boolean()
+					.optional()
+					.describe(params.classContext.description),
 				filePrefix: z
 					.string()
 					.optional()

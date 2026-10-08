@@ -32,10 +32,10 @@ export class Renderer {
 		this.out(JSON.stringify(value, null, 2));
 	}
 
-	hits(hits: readonly Hit[]): void {
-		for (const hit of hits) {
+	hits(hits: readonly Hit[], classContext = false): void {
+		for (const card of HitPresentation.cards(hits, classContext)) {
 			this.out(`\n${"─".repeat(Renderer.RULE_WIDTH)}`);
-			this.out(HitPresentation.format(hit));
+			this.out(card);
 		}
 	}
 

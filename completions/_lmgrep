@@ -45,6 +45,7 @@ _lmgrep() {
             '(-m --limit)'{-m,--limit}'[Max results]:count' \
             '--under[Only search files under this path]:path:_files -/' \
             '--language[Only search these file extensions]:extensions' \
+            '--context[Show brief class declaration/state and documentation]' \
             '--compact[Print matching file paths only]' \
             '--json[Print results as JSON]' \
             '*--in[Project directory, or the name of a standalone index]:project or name:_files -/'
