@@ -193,6 +193,12 @@ to keep in sync. Git never walks its own directory, so the index is never
 committed and never indexed. And because it is *there*, `du -sh` finds it,
 `rm -rf` removes it, and deleting a clone deletes its index with it.
 
+Search returns the indexed file versions for the current branch. When other
+branches' versions or duplicate chunks fill the nearest candidates, retrieval
+expands until it has the requested number of distinct matches or exhausts the
+candidates. Small CLI and MCP result limits therefore do not hide matches merely
+because another worktree shares the index.
+
 Each embedding model gets its own subdirectory. Changing `model` in your config
 selects a different database rather than invalidating the one you have, so
 trying another model costs one re-index and switching back costs nothing.

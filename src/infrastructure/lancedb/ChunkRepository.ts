@@ -70,28 +70,34 @@ export class ChunkRepository implements ChunkRepositoryPort {
 
 		// Over-fetch: branch/version filtering and dedup both discard rows, so
 		// pull extra to still return `limit` distinct results.
-		const fetchLimit = versions ? query.limit * 3 : query.limit * 2;
-
-		let builder = table
-			.query()
-			.nearestTo(query.vector.toArray())
-			.limit(fetchLimit)
-			.refineFactor(VectorIndexPolicy.REFINE_FACTOR)
-			.select([...SEARCH_COLUMNS]);
-
+		let fetchLimit = versions ? query.limit * 3 : query.limit * 2;
 		const predicate = this.buildPredicate(query);
-		if (predicate) builder = builder.where(predicate);
 
-		const rows = await builder.toArray();
-		let hits = HitList.of(rows.map((r) => this.toHit(r)));
+		while (true) {
+			let builder = table
+				.query()
+				.nearestTo(query.vector.toArray())
+				.limit(fetchLimit)
+				.refineFactor(VectorIndexPolicy.REFINE_FACTOR)
+				.select([...SEARCH_COLUMNS]);
 
-		if (versions) {
-			hits = hits.filtered((h) =>
-				h.fileVersion.matches(versions.versionOf(h.location.filePath)),
-			);
+			if (predicate) builder = builder.where(predicate);
+
+			const rows = await builder.toArray();
+			let hits = HitList.of(rows.map((r) => this.toHit(r)));
+
+			if (versions) {
+				hits = hits.filtered((h) =>
+					h.fileVersion.matches(versions.versionOf(h.location.filePath)),
+				);
+			}
+
+			hits = hits.deduplicated();
+			if (hits.length >= query.limit || rows.length < fetchLimit) {
+				return hits.takeAtMost(query.limit);
+			}
+			fetchLimit *= 2;
 		}
-
-		return hits.deduplicated().takeAtMost(query.limit);
 	}
 
 	/**
