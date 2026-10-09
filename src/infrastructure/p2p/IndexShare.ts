@@ -234,19 +234,26 @@ export class IndexShare {
 		onWarning?: (message: string) => void,
 	): void {
 		if (local?.embeddingProfile || remote.embeddingProfile) {
+			const refused = new Error(
+				"Source and destination embedding profiles do not match; import refused.",
+			);
 			if (
 				!local?.embeddingProfile ||
 				!remote.embeddingProfile ||
-				!new EmbeddingProfile(local.embeddingProfile).equals(
-					remote.embeddingProfile,
-				) ||
 				(local.dimensions !== undefined &&
 					local.dimensions !== remote.dimensions)
 			) {
-				throw new Error(
-					"Source and destination embedding profiles do not match; import refused.",
-				);
+				throw refused;
 			}
+			const profile = new EmbeddingProfile(local.embeddingProfile);
+			if (profile.equals(remote.embeddingProfile)) return;
+			const warning = profile.artifactDriftWarning(
+				remote.embeddingProfile,
+				local.model,
+				remote.model,
+			);
+			if (!warning) throw refused;
+			onWarning?.(warning);
 			return;
 		}
 		if (!local?.model || !remote.model) return;

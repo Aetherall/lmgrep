@@ -145,16 +145,24 @@ export class ShareCommands {
 		}
 
 		const sourceMeta = store.read(sourcePath);
-		if (
-			metadata?.embeddingProfile &&
-			(!sourceMeta?.embeddingProfile ||
-				!new EmbeddingProfile(metadata.embeddingProfile).equals(
-					sourceMeta.embeddingProfile,
-				))
-		) {
-			throw new Error(
-				"Source index has no matching verified embedding profile; import refused.",
-			);
+		if (metadata?.embeddingProfile) {
+			const profile = new EmbeddingProfile(metadata.embeddingProfile);
+			const source = sourceMeta?.embeddingProfile;
+			if (!source || !profile.equals(source)) {
+				const warning =
+					source &&
+					profile.artifactDriftWarning(
+						source,
+						metadata.model,
+						sourceMeta?.model,
+					);
+				if (!warning) {
+					throw new Error(
+						"Source index has no matching verified embedding profile; import refused.",
+					);
+				}
+				renderer.error(warning);
+			}
 		}
 		const lmgrep = await this.context.open({});
 		if (options.reset) await lmgrep.maintenance.reset();
@@ -164,6 +172,8 @@ export class ShareCommands {
 				...sourceMeta,
 				root: cwd,
 				branch: branch.toString(),
+				embeddingProfile:
+					metadata?.embeddingProfile ?? sourceMeta.embeddingProfile,
 			});
 
 		const tables = new LanceTables(location, branch);

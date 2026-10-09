@@ -102,7 +102,7 @@ test("real Docker indexing survives tag-to-digest alias changes without re-embed
 		factory.open({
 			cwd,
 			database: path,
-			config: { queryPrefix: "different: " },
+			config: { documentPrefix: "different: " },
 		}),
 		/do not match/,
 	);

@@ -56,14 +56,13 @@ test("Docker aliases resolve by artifact, not their spelling", () => {
 	);
 });
 
-test("different artifacts, dimensions and prefixes never share a verified index", () => {
+test("different artifacts, dimensions and document prefixes never share a verified index", () => {
 	const different = resolver.fromCatalog(config, [
 		{ id: otherDigest, tags: [oldName.slice(7)] },
 	]);
 	assert.notEqual(profile.toSlug(), different.toSlug());
 	for (const settings of [
 		{ dimensions: 1024 },
-		{ queryPrefix: "query: " },
 		{ documentPrefix: "document: " },
 	]) {
 		const changed = resolver.fromCatalog({ ...config, ...settings }, catalog);
@@ -79,6 +78,50 @@ test("different artifacts, dimensions and prefixes never share a verified index"
 			)
 			.toSlug(),
 	);
+});
+
+test("the query prefix only affects searches, not the index identity", () => {
+	const changed = resolver.fromCatalog(
+		{ ...config, queryPrefix: "query: " },
+		catalog,
+	);
+	assert.ok(profile.equals(changed.data));
+	assert.equal(profile.toSlug(), changed.toSlug());
+});
+
+test("imports tolerate a different digest only for the same model and settings", () => {
+	const repulled = resolver.fromCatalog(config, [
+		{ id: otherDigest, tags: [oldName.slice(7)] },
+	]);
+	assert.match(
+		profile.artifactDriftWarning(repulled.data, oldName, oldName),
+		/Importing anyway/,
+	);
+	assert.equal(
+		profile.artifactDriftWarning(profile.data, oldName, oldName),
+		undefined,
+	);
+	assert.equal(
+		profile.artifactDriftWarning(
+			repulled.data,
+			oldName,
+			"docker:docker.io/ai/other-embedding",
+		),
+		undefined,
+	);
+	assert.equal(profile.artifactDriftWarning(repulled.data, oldName), undefined);
+	for (const settings of [
+		{ dimensions: 1024 },
+		{ documentPrefix: "document: " },
+	]) {
+		const changed = resolver.fromCatalog({ ...config, ...settings }, [
+			{ id: otherDigest, tags: [oldName.slice(7)] },
+		]);
+		assert.equal(
+			profile.artifactDriftWarning(changed.data, oldName, oldName),
+			undefined,
+		);
+	}
 });
 
 test("missing aliases, invalid digests and OpenAI catalogs are not evidence of identity", () => {
@@ -153,7 +196,7 @@ test("unknown or conflicting contents at a verified path are rejected", (t) => {
 	writeFileSync(
 		join(path, "lmgrep.json"),
 		JSON.stringify({
-			embeddingProfile: { ...profile.data, queryPrefix: "wrong" },
+			embeddingProfile: { ...profile.data, documentPrefix: "wrong" },
 		}),
 	);
 	assert.throws(
