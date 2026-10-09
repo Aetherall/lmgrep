@@ -25,7 +25,11 @@ export type ShareMessage =
 export interface DuplexSocket {
 	write(data: Buffer): boolean;
 	on(event: "data", cb: (chunk: Buffer) => void): void;
-	on(event: "end" | "close" | "error", cb: (err?: Error) => void): void;
+	on(
+		event: "drain" | "end" | "close" | "error",
+		cb: (err?: Error) => void,
+	): void;
+	off(event: "drain" | "close" | "error", cb: (err?: Error) => void): void;
 	end(): void;
 	destroy(): void;
 }
@@ -45,14 +49,32 @@ export class SecureChannel {
 
 	constructor(private readonly key: Buffer) {}
 
-	send(socket: { write(data: Buffer): boolean }, message: ShareMessage): void {
+	/**
+	 * Resolves once the socket can take more data. A write only queues bytes in
+	 * memory, so a sender that does not wait here races ahead of the network.
+	 */
+	async send(socket: DuplexSocket, message: ShareMessage): Promise<void> {
 		const encrypted = this.encrypt(Buffer.from(JSON.stringify(message)));
 		const frame = Buffer.alloc(
 			SecureChannel.LENGTH_PREFIX_BYTES + encrypted.length,
 		);
 		frame.writeUInt32BE(encrypted.length, 0);
 		encrypted.copy(frame, SecureChannel.LENGTH_PREFIX_BYTES);
-		socket.write(frame);
+		if (socket.write(frame)) return;
+		await new Promise<void>((resolve, reject) => {
+			const settle = (err?: Error): void => {
+				socket.off("drain", onDrain);
+				socket.off("close", onClose);
+				socket.off("error", settle);
+				if (err) reject(err);
+				else resolve();
+			};
+			const onDrain = (): void => settle();
+			const onClose = (): void => settle(new Error("Connection closed"));
+			socket.on("drain", onDrain);
+			socket.on("close", onClose);
+			socket.on("error", settle);
+		});
 	}
 
 	/**

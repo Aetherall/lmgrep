@@ -69,37 +69,41 @@ export class IndexShare {
 			swarm.onConnection(async (socket) => {
 				clearTimeout(timeout);
 				try {
-					channel.send(socket, {
-						type: "meta",
-						model: metadata?.model,
-						dimensions: metadata?.dimensions,
-						embeddingProfile: metadata?.embeddingProfile,
-						chunkCount,
-						branch: metadata?.branch ?? "main",
-						remote: metadata?.remote,
-					});
 					// Wait for the receiver to accept before streaming — it may
 					// refuse on an incompatible model.
-					await channel.await(socket, "ready");
+					await Promise.all([
+						channel.await(socket, "ready"),
+						channel.send(socket, {
+							type: "meta",
+							model: metadata?.model,
+							dimensions: metadata?.dimensions,
+							embeddingProfile: metadata?.embeddingProfile,
+							chunkCount,
+							branch: metadata?.branch ?? "main",
+							remote: metadata?.remote,
+						}),
+					]);
 
 					let sent = 0;
 					for await (const batch of this.rows.streamChunkRows(
 						IndexShare.BATCH_SIZE,
 					)) {
-						channel.send(socket, { type: "chunks", batch });
+						await channel.send(socket, { type: "chunks", batch });
 						sent += batch.length;
 						options.onProgress?.(sent, chunkCount);
 					}
 
 					const files = await this.rows.allManifestRows();
 					if (files.length > 0) {
-						channel.send(socket, { type: "files", batch: files });
+						await channel.send(socket, { type: "files", batch: files });
 					}
 
-					channel.send(socket, { type: "done" });
 					// Wait for the ack so the socket is not torn down before
 					// the receiver has committed.
-					await channel.await(socket, "ack");
+					await Promise.all([
+						channel.await(socket, "ack"),
+						channel.send(socket, { type: "done" }),
+					]);
 
 					socket.end();
 					await swarm.destroy();
@@ -142,6 +146,18 @@ export class IndexShare {
 				let chunks = 0;
 				let files = 0;
 				let accepted = false;
+				let failed = false;
+				// Writes run one at a time, in arrival order, and are awaited before
+				// acknowledging — the ack promises the sender everything is committed.
+				let writes = Promise.resolve();
+				const enqueue = (work: () => Promise<void>): void => {
+					writes = writes
+						.then(() => (failed ? undefined : work()))
+						.catch((err) => {
+							failed = true;
+							fail(err);
+						});
+				};
 
 				const handle = (message: ShareMessage): void => {
 					switch (message.type) {
@@ -158,27 +174,36 @@ export class IndexShare {
 								chunkCount: message.chunkCount,
 								remote: message.remote,
 							});
-							channel.send(socket, { type: "ready" });
+							channel.send(socket, { type: "ready" }).catch(fail);
 							accepted = true;
 							break;
 						}
 						case "chunks": {
 							// Ignore anything arriving before the handshake.
 							if (!accepted) break;
-							chunks += message.batch.length;
-							options.onProgress?.(chunks, expected);
-							this.rows.addChunkRows(message.batch).catch(fail);
+							const { batch } = message;
+							enqueue(async () => {
+								await this.rows.addChunkRows(batch);
+								chunks += batch.length;
+								options.onProgress?.(chunks, expected);
+							});
 							break;
 						}
 						case "files": {
 							if (!accepted) break;
-							files += message.batch.length;
-							this.rows.addManifestRows(message.batch).catch(fail);
+							const { batch } = message;
+							enqueue(async () => {
+								await this.rows.addManifestRows(batch);
+								files += batch.length;
+							});
 							break;
 						}
 						case "done": {
-							channel.send(socket, { type: "ack" });
-							void swarm.destroy().then(() => resolve({ chunks, files }));
+							enqueue(async () => {
+								await channel.send(socket, { type: "ack" });
+								await swarm.destroy();
+								resolve({ chunks, files });
+							});
 							break;
 						}
 					}
