@@ -22,7 +22,7 @@ import { ChunkRepository } from "../infrastructure/lancedb/ChunkRepository.js";
 import { FileManifestRepository } from "../infrastructure/lancedb/FileManifestRepository.js";
 import { IndexMaintenance } from "../infrastructure/lancedb/IndexMaintenance.js";
 import { LanceTables } from "../infrastructure/lancedb/LanceTables.js";
-import { TreeSitterChunker } from "../infrastructure/treesitter/TreeSitterChunker.js";
+import { ParallelChunker } from "../infrastructure/treesitter/ParallelChunker.js";
 import { BranchBootstrapper } from "./indexing/BranchBootstrapper.js";
 import { BranchManifestSweeper } from "./indexing/BranchManifestSweeper.js";
 import { IndexBuilder } from "./indexing/IndexBuilder.js";
@@ -139,7 +139,7 @@ export class LmgrepFactory {
 			new AiSdkEmbedder(
 				profile ? { ...config, model: profile.data.artifact } : config,
 			);
-		const chunker = options.chunker ?? new TreeSitterChunker();
+		const chunker = options.chunker ?? new ParallelChunker();
 		const workspace = new Workspace();
 		const reloader = new LocalModelReloader(config);
 

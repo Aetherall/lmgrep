@@ -21,8 +21,8 @@ export class TreeSitterChunker implements ChunkerPort {
 	private static readonly MAX_CHUNK_TOKENS = 8192;
 	private static readonly MIN_CHUNK_CHARS = 50;
 
-	private parser: Parser | undefined;
-	private readonly loaded = new Map<string, Language>();
+	private parser: Promise<Parser> | undefined;
+	private readonly loaded = new Map<string, Promise<Language | undefined>>();
 
 	constructor(
 		private readonly catalog = new LanguageCatalog(),
@@ -42,11 +42,10 @@ export class TreeSitterChunker implements ChunkerPort {
 		const grammar = await this.loadGrammar(language);
 		if (!grammar) return this.fallback.chunk(filePath, cwd);
 
-		parser.setLanguage(grammar);
-
 		const source = readFileSync(join(cwd, filePath), "utf-8");
+		parser.setLanguage(grammar);
 		const tree = parser.parse(source);
-		if (!tree) return this.fallback.chunk(filePath, cwd);
+		if (!tree) return this.fallback.chunkSource(filePath, source);
 
 		try {
 			if (language.id === "markdown") {
@@ -55,41 +54,45 @@ export class TreeSitterChunker implements ChunkerPort {
 			const spans: Array<{ node: Node; start: number; end: number }> = [];
 			for (const node of tree.rootNode.namedChildren) {
 				const before = spans.length;
-				this.collect(node, language, spans);
+				this.collect(node, language, source, spans);
 				if (!this.isContextOnly(node, language)) {
 					const covered = spans.slice(before).sort((a, b) => a.start - b.start);
 					let cursor = node.startIndex;
 					for (const span of covered) {
-						this.addSpan(node, cursor, span.start, spans);
+						this.addSpan(node, cursor, span.start, source, spans);
 						cursor = Math.max(cursor, span.end);
 					}
-					this.addSpan(node, cursor, node.endIndex, spans);
+					this.addSpan(node, cursor, node.endIndex, source, spans);
 				}
 			}
+			const lines = source.split("\n");
+			const lineAt = this.lineLookup(lines);
 			const chunks = spans
 				.sort((a, b) => a.start - b.start)
 				.map(({ node, start, end }) => {
 					const content = source.slice(start, end);
 					const scope = this.context.extractScope(node, language);
 					const name = this.nodeName(node);
+					const startLine = lineAt(start);
 					const qualifiedName = name
 						? [...scope.map((entry) => entry.name), name].join(".")
-						: `lines_${source.slice(0, start).split("\n").length}`;
+						: `lines_${startLine}`;
 					return new Chunk({
 						location: new CodeLocation(
 							filePath,
-							source.slice(0, start).split("\n").length,
-							source.slice(0, end).split("\n").length -
-								(content.endsWith("\n") ? 1 : 0),
+							startLine,
+							lineAt(end) - (content.endsWith("\n") ? 1 : 0),
 						),
 						type: language.chunkTypes.includes(node.type) ? node.type : "block",
 						name: qualifiedName,
 						content,
-						context: `${this.context.build(node, filePath, source, language)}\n[symbol: ${qualifiedName}]`,
+						context: `${this.context.build(node, filePath, lines, scope)}\n[symbol: ${qualifiedName}]`,
 						hash: ContentHash.of(content),
 					});
 				});
-			return chunks.length > 0 ? chunks : this.fallback.chunk(filePath, cwd);
+			return chunks.length > 0
+				? chunks
+				: this.fallback.chunkSource(filePath, source);
 		} finally {
 			tree.delete();
 		}
@@ -142,6 +145,7 @@ export class TreeSitterChunker implements ChunkerPort {
 	private collect(
 		node: Node,
 		language: LanguageConfig,
+		source: string,
 		spans: Array<{ node: Node; start: number; end: number }>,
 		start = node.startIndex,
 		end = node.endIndex,
@@ -154,14 +158,14 @@ export class TreeSitterChunker implements ChunkerPort {
 				node.childForFieldName("declaration") ??
 				node.childForFieldName("definition");
 			if (declaration) {
-				this.collect(declaration, language, spans, start, end);
+				this.collect(declaration, language, source, spans, start, end);
 				return;
 			}
 		}
 		if (node.type === "variable_declarator") {
 			const value = node.childForFieldName("value");
 			if (value?.type === "arrow_function") {
-				this.collect(value, language, spans, start, end);
+				this.collect(value, language, source, spans, start, end);
 				return;
 			}
 		}
@@ -172,34 +176,37 @@ export class TreeSitterChunker implements ChunkerPort {
 					node.type === "variable_declaration") &&
 				children.length === 1
 			) {
-				this.collect(children[0], language, spans, start, end);
+				this.collect(children[0], language, source, spans, start, end);
 			} else {
-				for (const child of children) this.collect(child, language, spans);
+				for (const child of children)
+					this.collect(child, language, source, spans);
 			}
 			return;
 		}
+		const length = node.endIndex - node.startIndex;
 		const split =
 			(language.scopeTypes.includes(node.type) ||
-				Math.ceil(node.text.length / 4) > TreeSitterChunker.MAX_CHUNK_TOKENS) &&
+				Math.ceil(length / 4) > TreeSitterChunker.MAX_CHUNK_TOKENS) &&
 			this.hasChunkableDescendants(node, language);
 		if (split) {
 			const before = spans.length;
 			for (const child of node.namedChildren)
-				this.collect(child, language, spans);
+				this.collect(child, language, source, spans);
 			const children = spans.slice(before).sort((a, b) => a.start - b.start);
 			let cursor = start;
 			for (const child of children) {
-				this.addSpan(node, cursor, child.start, spans);
+				this.addSpan(node, cursor, child.start, source, spans);
 				cursor = child.end;
 			}
-			this.addSpan(node, cursor, end, spans);
+			this.addSpan(node, cursor, end, source, spans);
 			return;
 		}
 		const name = this.nodeName(node);
+		const newline = source.indexOf("\n", node.startIndex);
 		if (
 			!name &&
-			!node.text.includes("\n") &&
-			node.text.length < TreeSitterChunker.MIN_CHUNK_CHARS
+			(newline === -1 || newline >= node.endIndex) &&
+			length < TreeSitterChunker.MIN_CHUNK_CHARS
 		) {
 			return;
 		}
@@ -222,19 +229,10 @@ export class TreeSitterChunker implements ChunkerPort {
 		node: Node,
 		start: number,
 		end: number,
+		source: string,
 		spans: Array<{ node: Node; start: number; end: number }>,
 	): void {
-		let enclosing = node;
-		while (
-			enclosing.parent &&
-			(start < enclosing.startIndex || end > enclosing.endIndex)
-		) {
-			enclosing = enclosing.parent;
-		}
-		const content = enclosing.text.slice(
-			start - enclosing.startIndex,
-			end - enclosing.startIndex,
-		);
+		const content = source.slice(start, end);
 		const meaningful = content
 			.replace(/\/\*[\s\S]*?\*\//g, "")
 			.replace(/(?:\/\/|#|--)[^\n]*/g, "");
@@ -301,14 +299,38 @@ export class TreeSitterChunker implements ChunkerPort {
 		)?.text;
 	}
 
-	private async getParser(): Promise<Parser> {
-		if (!this.parser) {
+	/**
+	 * Offset to 1-based line number by binary search over line start offsets,
+	 * so a file costs one pass however many chunks it yields.
+	 */
+	private lineLookup(lines: string[]): (offset: number) => number {
+		const starts = new Array<number>(lines.length);
+		let offset = 0;
+		for (let i = 0; i < lines.length; i++) {
+			starts[i] = offset;
+			offset += lines[i].length + 1;
+		}
+		return (target) => {
+			let low = 0;
+			let high = starts.length;
+			while (low < high) {
+				const mid = (low + high) >>> 1;
+				if (starts[mid] <= target) low = mid + 1;
+				else high = mid;
+			}
+			return low;
+		};
+	}
+
+	/** Memoized as a promise so concurrent calls share one initialization. */
+	private getParser(): Promise<Parser> {
+		this.parser ??= (async () => {
 			const parserWasm = embeddedParserPath();
 			await Parser.init(
 				parserWasm ? { locateFile: () => parserWasm } : undefined,
 			);
-			this.parser = new Parser();
-		}
+			return new Parser();
+		})();
 		return this.parser;
 	}
 
@@ -316,17 +338,13 @@ export class TreeSitterChunker implements ChunkerPort {
 	 * Grammars are cached for the process lifetime. They are wasm modules whose
 	 * linear memory only ever grows, so loading one repeatedly would leak.
 	 */
-	private async loadGrammar(
-		language: LanguageConfig,
-	): Promise<Language | undefined> {
-		const cached = this.loaded.get(language.id);
-		if (cached) return cached;
-
-		const wasmPath = this.catalog.wasmPathFor(language);
-		if (!wasmPath) return undefined;
-
-		const grammar = await Language.load(wasmPath);
-		this.loaded.set(language.id, grammar);
+	private loadGrammar(language: LanguageConfig): Promise<Language | undefined> {
+		let grammar = this.loaded.get(language.id);
+		if (!grammar) {
+			const wasmPath = this.catalog.wasmPathFor(language);
+			grammar = wasmPath ? Language.load(wasmPath) : Promise.resolve(undefined);
+			this.loaded.set(language.id, grammar);
+		}
 		return grammar;
 	}
 }

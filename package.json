@@ -10,7 +10,7 @@
 	"scripts": {
 		"build": "tsc",
 		"build:package": "pnpm clean && pnpm build",
-		"build:standalone": "bun build ./standalone/cli.ts --compile --minify --outfile ./artifacts/lmgrep",
+		"build:standalone": "bun build ./standalone/cli.ts ./src/infrastructure/treesitter/ChunkWorker.ts --compile --minify --outfile ./artifacts/lmgrep",
 		"clean": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\"",
 		"dev": "tsc --watch",
 		"start": "node dist/cli.js",

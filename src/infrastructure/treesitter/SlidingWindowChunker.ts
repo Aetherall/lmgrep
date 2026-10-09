@@ -17,7 +17,14 @@ export class SlidingWindowChunker implements ChunkerPort {
 	private static readonly STRIDE_LINES = 40;
 
 	async chunk(filePath: string, cwd: string): Promise<Chunk[]> {
-		const source = readFileSync(join(cwd, filePath), "utf-8");
+		return this.chunkSource(
+			filePath,
+			readFileSync(join(cwd, filePath), "utf-8"),
+		);
+	}
+
+	/** Window a source that has already been read. */
+	chunkSource(filePath: string, source: string): Chunk[] {
 		const lines = source.split("\n");
 		if (lines.length === 0) return [];
 

@@ -50,5 +50,6 @@ export {
 	ProcessRegistry,
 	type RunningProcess,
 } from "./infrastructure/process/ProcessRegistry.js";
+export { ParallelChunker } from "./infrastructure/treesitter/ParallelChunker.js";
 export { TreeSitterChunker } from "./infrastructure/treesitter/TreeSitterChunker.js";
 export { LmgrepCore } from "./presentation/mcp/LmgrepCore.js";

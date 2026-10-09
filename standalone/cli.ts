@@ -63,6 +63,8 @@ import { registerEmbeddedTreeSitterAssets } from "../src/infrastructure/treesitt
 
 registerEmbeddedTreeSitterAssets({
 	parser: parserWasm,
+	// Compiled in as a second entry point by `build:standalone`.
+	chunkWorker: "./src/infrastructure/treesitter/ChunkWorker.ts",
 	grammars: {
 		"tree-sitter-bash.wasm": bash,
 		"tree-sitter-c.wasm": c,

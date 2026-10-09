@@ -82,29 +82,32 @@ export class ChunkContextBuilder {
 		"decorated_definition",
 	]);
 
-	/** The full header for one chunk. */
+	/**
+	 * The full header for one chunk. Takes the file's lines and the node's scope
+	 * from the caller, which already has both: recomputing them per chunk made
+	 * large files quadratic.
+	 */
 	build(
 		node: Node,
 		filePath: string,
-		source: string,
-		language: LanguageConfig,
+		lines: string[],
+		scope: ScopeEntry[],
 	): string {
-		const lines: string[] = [
+		const header: string[] = [
 			`[file: ${filePath}]`,
 			`[role: ${this.classifyRole(node)}]`,
 		];
 
-		const scope = this.extractScope(node, language);
 		if (scope.length > 0) {
-			lines.push(
+			header.push(
 				`[scope: ${scope.map((s) => `${s.kind} ${s.name}`).join(" > ")}]`,
 			);
 		}
 
-		const comment = this.extractLeadingComment(node, source);
-		if (comment) lines.push(`[doc: ${comment}]`);
+		const comment = this.extractLeadingComment(node, lines);
+		if (comment) header.push(`[doc: ${comment}]`);
 
-		return lines.join("\n");
+		return header.join("\n");
 	}
 
 	/** The minimal header for a file with no parsed structure. */
@@ -138,8 +141,7 @@ export class ChunkContextBuilder {
 	 * comment separated from its node by whitespace is still picked up, while
 	 * unrelated code above it is not.
 	 */
-	extractLeadingComment(node: Node, source: string): string | null {
-		const lines = source.split("\n");
+	extractLeadingComment(node: Node, lines: string[]): string | null {
 		const start = node.startPosition.row;
 		const collected: string[] = [];
 

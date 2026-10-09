@@ -69,6 +69,9 @@ export interface IndexBuilderDependencies {
  * re-embeds them cleanly, after dropping their partial chunks).
  */
 export class IndexBuilder {
+	/** Enough files in flight to keep a worker pool busy, few enough to stay small. */
+	private static readonly CHUNK_CONCURRENCY = 32;
+
 	constructor(private readonly deps: IndexBuilderDependencies) {}
 
 	/**
@@ -287,41 +290,57 @@ export class IndexBuilder {
 		return fresh;
 	}
 
+	/**
+	 * Keeps several files in flight so a chunker backed by worker threads can
+	 * parse them in parallel. Results keep the input file order.
+	 */
 	private async chunkAll(
 		files: SourceFile[],
 		options: IndexBuildOptions,
 	): Promise<Chunk[]> {
-		const all: Chunk[] = [];
+		const produced: Chunk[][] = new Array(files.length);
+		let next = 0;
+		let done = 0;
+		let chunkCount = 0;
 
-		for (let i = 0; i < files.length; i++) {
-			const file = files[i];
-			try {
-				const produced = await this.deps.chunker.chunk(
-					file.path,
-					this.deps.location.root,
-				);
-				// Stamp each chunk with its file's version so search can scope
-				// to exactly the versions this branch references.
-				const version = FileVersion.of(file.hash);
-				for (const chunk of produced) all.push(chunk.stampedWith(version));
-			} catch {
-				// A file that fails to parse is skipped, not fatal — one bad
-				// file must not abort a whole index run.
-			}
+		const drain = async (): Promise<void> => {
+			while (next < files.length) {
+				const i = next++;
+				const file = files[i];
+				try {
+					const chunks = await this.deps.chunker.chunk(
+						file.path,
+						this.deps.location.root,
+					);
+					// Stamp each chunk with its file's version so search can scope
+					// to exactly the versions this branch references.
+					const version = FileVersion.of(file.hash);
+					produced[i] = chunks.map((chunk) => chunk.stampedWith(version));
+					chunkCount += chunks.length;
+				} catch {
+					// A file that fails to parse is skipped, not fatal — one bad
+					// file must not abort a whole index run.
+					produced[i] = [];
+				}
 
-			if ((i + 1) % 1000 === 0 || i === files.length - 1) {
-				options.onProgress?.({
-					phase: "chunk",
-					current: i + 1,
-					total: files.length,
-					message: `${all.length} chunks`,
-				});
-				this.deps.logger.info(
-					`Chunking: ${i + 1}/${files.length} files, ${all.length} chunks so far`,
-				);
+				done++;
+				if (done % 1000 === 0 || done === files.length) {
+					options.onProgress?.({
+						phase: "chunk",
+						current: done,
+						total: files.length,
+						message: `${chunkCount} chunks`,
+					});
+					this.deps.logger.info(
+						`Chunking: ${done}/${files.length} files, ${chunkCount} chunks so far`,
+					);
+				}
 			}
-		}
-		return all;
+		};
+		await Promise.all(
+			Array.from({ length: IndexBuilder.CHUNK_CONCURRENCY }, drain),
+		);
+		return produced.flat();
 	}
 
 	/** Drop chunks already embedded, then any the provider would reject. */
