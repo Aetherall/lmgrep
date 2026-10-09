@@ -8,7 +8,6 @@ import {
 	watch,
 } from "node:fs";
 import { join } from "node:path";
-import { globSync } from "glob";
 import { ContentHash } from "../../domain/corpus/ContentHash.js";
 import { SourceFile } from "../../domain/corpus/SourceFile.js";
 import type {
@@ -27,9 +26,33 @@ export class Workspace implements WorkspacePort {
 		extensions?: ExtensionRules,
 	): string[] {
 		const rules = new IndexableFileRules(cwd, extraIgnore, extensions);
-		const all = globSync("**/*", { cwd, nodir: true, dot: false });
-		rules.loadNestedIgnores(all);
-		return all.filter((f) => rules.admits(f));
+		const files: string[] = [];
+		// Ignored directories are never entered. Globbing the whole tree and
+		// filtering afterwards walked node_modules on every reconcile: 2s per
+		// pass on a 15k-file monorepo, for each watching worktree.
+		const walk = (dir: string): void => {
+			let entries: Dirent[];
+			try {
+				entries = readdirSync(join(cwd, dir), { withFileTypes: true });
+			} catch {
+				return;
+			}
+			rules.loadNestedIgnore(dir);
+			for (const entry of entries) {
+				// Dotfiles and dot-directories are not indexed.
+				if (entry.name.startsWith(".")) continue;
+				const path = dir ? `${dir}/${entry.name}` : entry.name;
+				if (entry.isDirectory()) {
+					if (rules.admitsDirectory(path)) walk(path);
+				} else if (rules.admits(path)) {
+					// Symlinks land here whatever they point to: they are listed,
+					// never followed.
+					files.push(path);
+				}
+			}
+		};
+		walk("");
+		return files.sort();
 	}
 
 	hashOf(cwd: string, filePath: string): ContentHash | undefined {

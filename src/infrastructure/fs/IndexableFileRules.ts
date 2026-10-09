@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, extname, join } from "node:path";
+import { extname, join } from "node:path";
 import ignore, { type Ignore } from "ignore";
 import type { ExtensionRules } from "../../domain/ports/WorkspacePort.js";
 
@@ -132,21 +132,16 @@ export class IndexableFileRules {
 	}
 
 	/**
-	 * Load `.gitignore` files sitting in subdirectories, so a nested ignore
-	 * applies to its own subtree the way git applies it.
+	 * Load the `.gitignore` sitting in a subdirectory, so it applies to its own
+	 * subtree the way git applies it. Called as a walk enters each directory.
 	 */
-	loadNestedIgnores(relativePaths: readonly string[]): void {
-		for (const f of relativePaths) {
-			if (f.endsWith("/.gitignore") || f === ".gitignore") continue;
-			const dir = dirname(f);
-			if (dir === "." || this.nested.has(dir)) continue;
-
-			const nestedPath = join(this.cwd, dir, ".gitignore");
-			if (!existsSync(nestedPath)) continue;
-			const rules = ignore();
-			rules.add(readFileSync(nestedPath, "utf-8"));
-			this.nested.set(dir, rules);
-		}
+	loadNestedIgnore(dir: string): void {
+		if (dir === "" || this.nested.has(dir)) return;
+		const nestedPath = join(this.cwd, dir, ".gitignore");
+		if (!existsSync(nestedPath)) return;
+		const rules = ignore();
+		rules.add(readFileSync(nestedPath, "utf-8"));
+		this.nested.set(dir, rules);
 	}
 
 	/** Whether any nested `.gitignore` excludes this path. */
@@ -156,6 +151,16 @@ export class IndexableFileRules {
 			if (rules.ignores(filePath.slice(dir.length + 1))) return true;
 		}
 		return false;
+	}
+
+	/**
+	 * Whether a walk should descend into this directory. Like git, an ignored
+	 * directory is not entered, so nothing inside it can be re-included.
+	 */
+	admitsDirectory(dirPath: string): boolean {
+		return (
+			!this.isIgnored(`${dirPath}/`) && !this.isIgnoredByNested(`${dirPath}/`)
+		);
 	}
 
 	/** Full decision for a scanned path. */
