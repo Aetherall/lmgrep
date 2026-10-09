@@ -100,13 +100,16 @@ export class ParallelChunker implements ChunkerPort {
 			this.disabled = true;
 			return undefined;
 		}
-		thread.unref();
 		const worker: PoolWorker = { thread, tasks: new Map(), started: false };
 		thread.on("message", (response: ChunkResponse) =>
 			this.settle(worker, response),
 		);
 		thread.on("error", () => this.abandon(worker));
 		thread.on("exit", () => this.abandon(worker));
+		// After the listeners: attaching a message listener re-references the
+		// worker, so a worker that never received a file kept the process
+		// alive until the idle timeout terminated it.
+		thread.unref();
 		return worker;
 	}
 

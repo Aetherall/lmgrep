@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
@@ -81,4 +82,22 @@ test("line numbers stay exact deep into a large generated file", async (t) => {
 		assert.equal(chunks[i].location.startLine, i * 4 + 1);
 		assert.equal(chunks[i].location.endLine, i * 4 + 3);
 	}
+});
+
+test("a process exits promptly when most workers never received a file", (t) => {
+	// A script file rather than --eval: workers inherit the parent's flags,
+	// and with --input-type they fail to start, hiding the bug in-process.
+	const dir = mkdtempSync(join(tmpdir(), "lmgrep-exit-"));
+	t.after(() => rmSync(dir, { recursive: true, force: true }));
+	const script = join(dir, "chunk-one.mjs");
+	writeFileSync(
+		script,
+		`const { ParallelChunker } = await import(${JSON.stringify(new URL("../dist/infrastructure/treesitter/ParallelChunker.js", import.meta.url).href)});
+		const pool = new ParallelChunker(4);
+		await pool.chunk("src/index.ts", ${JSON.stringify(root)});
+		if (pool.workers.length !== 4) throw new Error("workers did not start");`,
+	);
+	const started = Date.now();
+	execFileSync(process.execPath, [script], { timeout: 20_000 });
+	assert.ok(Date.now() - started < 5000, `took ${Date.now() - started}ms`);
 });
