@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import type { GitPort } from "../../domain/ports/GitPort.js";
 
@@ -62,6 +63,30 @@ export class GitClient implements GitPort {
 			.split("\n")
 			.map((l) => l.trim())
 			.filter(Boolean);
+	}
+
+	/**
+	 * Paths are resolved the way `--show-toplevel` resolves them, so they
+	 * compare equal to the root a worktree reports for itself even when one
+	 * was added through a symlink.
+	 */
+	detachedWorktrees(repoRoot: string): string[] {
+		const out = this.run(repoRoot, "worktree", "list", "--porcelain");
+		if (!out) return [];
+		const roots: string[] = [];
+		for (const block of out.split(/\n\s*\n/)) {
+			const lines = block.split("\n").map((l) => l.trim());
+			const path = lines
+				.find((l) => l.startsWith("worktree "))
+				?.slice("worktree ".length);
+			if (!path || !lines.includes("detached")) continue;
+			try {
+				roots.push(realpathSync(path));
+			} catch {
+				// A worktree whose directory is gone has no scope to keep.
+			}
+		}
+		return roots;
 	}
 
 	/**

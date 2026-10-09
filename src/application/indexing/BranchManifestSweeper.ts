@@ -26,6 +26,10 @@ export class BranchManifestSweeper {
 		const live = new Set(branches);
 		// Non-git projects index under the default branch, which git never lists.
 		live.add(Branch.DEFAULT_NAME);
+		// A detached worktree's scope lives as long as it stays detached.
+		for (const root of this.git.detachedWorktrees(repoRoot)) {
+			live.add(Branch.detachedAt(root).toString());
+		}
 
 		for (const stored of await this.manifest.storedBranches()) {
 			if (live.has(stored)) continue;

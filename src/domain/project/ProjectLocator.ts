@@ -66,7 +66,11 @@ export class ProjectLocator {
 
 		const gitRoot = this.git.toplevel(absolute);
 		if (gitRoot) {
-			const branch = Branch.of(this.git.currentBranch(gitRoot) ?? "HEAD");
+			const current = this.git.currentBranch(gitRoot);
+			const branch =
+				current && current !== "HEAD"
+					? Branch.of(current)
+					: Branch.detachedAt(gitRoot);
 			const remoteUrl = this.git.originUrl(gitRoot);
 			return new Project(
 				ProjectId.of(remoteUrl ?? gitRoot),

@@ -25,4 +25,6 @@ export interface GitPort {
 	): number | undefined;
 	/** Local branch names. */
 	localBranches(repoRoot: string): string[];
+	/** Roots of this repository's worktrees whose HEAD is detached. */
+	detachedWorktrees(repoRoot: string): string[];
 }

@@ -20,6 +20,18 @@ export class Branch {
 		return new Branch(Branch.DEFAULT_NAME);
 	}
 
+	/**
+	 * Scope for a worktree with a detached HEAD, keyed by the worktree itself.
+	 *
+	 * Detached worktrees used to share the literal scope "HEAD", so every one
+	 * of them overwrote the others' file versions, and the sweeper deleted it
+	 * after each build because "HEAD" is not a branch. Git forbids `:` in
+	 * branch names, so this cannot collide with a real branch.
+	 */
+	static detachedAt(worktreeRoot: string): Branch {
+		return new Branch(`detached:${worktreeRoot}`);
+	}
+
 	toString(): string {
 		return this.name;
 	}

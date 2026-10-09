@@ -1,5 +1,7 @@
+import { randomBytes } from "node:crypto";
 import {
 	existsSync,
+	linkSync,
 	mkdirSync,
 	readFileSync,
 	unlinkSync,
@@ -27,15 +29,77 @@ export interface LockOwner {
 export class PidFileLock {
 	constructor(readonly path: string) {}
 
-	/** True when acquired; false when a live process already holds it. */
+	/**
+	 * True when acquired; false when a live process already holds it.
+	 *
+	 * Checking for the file and then writing it let two processes that
+	 * started together both see it free and both "acquire" it. The lock is
+	 * instead written in full to a private draft and published with link(),
+	 * which fails if the lock exists: exactly one contender can create it, and
+	 * no reader ever sees a half-written lock and mistakes it for corrupt.
+	 */
 	tryAcquire(owner: Omit<LockOwner, "pid"> = {}): boolean {
-		if (this.isHeldByLiveProcess()) return false;
 		mkdirSync(dirname(this.path), { recursive: true });
-		writeFileSync(
-			this.path,
-			`${JSON.stringify({ pid: process.pid, ...owner })}\n`,
-		);
-		return true;
+		const body = `${JSON.stringify({ pid: process.pid, ...owner })}\n`;
+		// A second attempt only after removing a dead owner's lock.
+		for (let attempt = 0; attempt < 2; attempt++) {
+			if (this.claim(this.path, body)) return true;
+			if (!this.removeIfStale()) return false;
+		}
+		return false;
+	}
+
+	/** Create `path` holding `body`, only if it does not exist yet. */
+	private claim(path: string, body: string): boolean {
+		const draft = `${path}.draft.${process.pid}.${randomBytes(6).toString("hex")}`;
+		writeFileSync(draft, body);
+		try {
+			linkSync(draft, path);
+			return true;
+		} catch (err) {
+			if ((err as NodeJS.ErrnoException).code === "EEXIST") return false;
+			throw err;
+		} finally {
+			PidFileLock.unlinkQuietly(draft);
+		}
+	}
+
+	/**
+	 * Remove the lock if its owner is dead; false when it cannot be taken.
+	 *
+	 * Contenders that all judge the same lock stale must not each remove it, or
+	 * a slow one deletes the fresh lock a fast one just published. Removal
+	 * therefore requires the takeover guard, itself claimed atomically. While
+	 * it is held nobody else removes the lock, and nobody can publish over a
+	 * lock that still exists — so a lock still stale under the guard is safe to
+	 * delete.
+	 */
+	private removeIfStale(): boolean {
+		if (this.isHeldByLiveProcess()) return false;
+		const guard = `${this.path}.takeover`;
+		const body = `${JSON.stringify({ pid: process.pid })}\n`;
+		for (let attempt = 0; attempt < 2; attempt++) {
+			if (this.claim(guard, body)) {
+				try {
+					// Re-read under the guard. An absent lock is left alone:
+					// someone may publish into the gap at any moment, and
+					// unlinking after they do would delete a live lock.
+					if (!existsSync(this.path)) return true;
+					if (this.isHeldByLiveProcess()) return false;
+					PidFileLock.unlinkQuietly(this.path);
+					return true;
+				} finally {
+					PidFileLock.unlinkQuietly(guard);
+				}
+			}
+			// Another contender is mid-takeover and will publish. Only a guard
+			// whose holder is known dead is cleared; an unreadable one was
+			// most likely just released, and the retry claims it.
+			const holder = PidFileLock.parse(PidFileLock.readQuietly(guard));
+			if (holder && PidFileLock.isAlive(holder.pid)) return false;
+			if (holder) PidFileLock.unlinkQuietly(guard);
+		}
+		return false;
 	}
 
 	/** Release unconditionally — used by the long-lived maintainer lock. */
@@ -71,13 +135,26 @@ export class PidFileLock {
 	 * watcher's lock as free and start a second one.
 	 */
 	read(): LockOwner | undefined {
-		let raw: string;
+		return PidFileLock.parse(PidFileLock.readQuietly(this.path));
+	}
+
+	private static readQuietly(path: string): string | undefined {
 		try {
-			raw = readFileSync(this.path, "utf-8").trim();
+			return readFileSync(path, "utf-8");
 		} catch {
 			return undefined;
 		}
-		if (raw.length === 0) return undefined;
+	}
+
+	private static unlinkQuietly(path: string): void {
+		try {
+			unlinkSync(path);
+		} catch {}
+	}
+
+	private static parse(body: string | undefined): LockOwner | undefined {
+		const raw = body?.trim();
+		if (!raw) return undefined;
 
 		if (raw.startsWith("{")) {
 			try {
