@@ -111,3 +111,24 @@ test("pruning compacts the fragments left by successive writes", async (t) => {
 	assert.equal(await chunks.countRows(), 6);
 	assert.equal((await chunks.stats()).fragmentStats.numFragments, 1);
 });
+
+test("checking out the latest version sees another process's writes immediately", async (t) => {
+	const root = database(t);
+	const seed = new LanceTables(root, branch);
+	await new FileManifestRepository(seed, branch).upsert([
+		{ path: "a.ts", hash: ContentHash.fromStored("h1") },
+	]);
+	await seed.tableOrCreate(TableName.Chunks, [row("v1", "h1")]);
+	seed.close();
+
+	const reader = open(t, root);
+	const stored = async () => [
+		...(await reader.chunks.existingHashes([ContentHash.fromStored("v2")])),
+	];
+	assert.deepEqual(await stored(), []);
+
+	execFileSync(process.execPath, ["--input-type=module", "-e", WRITER, root]);
+	await reader.tables.checkoutLatest();
+
+	assert.deepEqual(await stored(), ["v2"]);
+});

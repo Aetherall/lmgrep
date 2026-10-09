@@ -9,7 +9,7 @@ import { PidFileLock } from "./PidFileLock.js";
  *
  * The **write mutex** (`.writelock`) is per *database*, because that is what
  * concurrent writers actually contend for: two indexers writing the same
- * tables race into duplicate rows. It is held only around a build.
+ * tables race into duplicate rows. It is held only around each write.
  *
  * The **maintainer** lock is per *worktree*. Watching is inherently per
  * working tree — a watcher scans its own root and maintains its own branch's
@@ -27,7 +27,12 @@ import { PidFileLock } from "./PidFileLock.js";
  * lmgrep by reading a single directory.
  */
 export class DatabaseLocks implements LockPort {
-	private static readonly DEFAULT_WAIT_MS = 120_000;
+	/**
+	 * Builds hold the write mutex only around writes, so a wait this long only
+	 * happens behind a reset or a first vector-index training. Giving up
+	 * sooner would throw away whatever the waiting build already embedded.
+	 */
+	private static readonly DEFAULT_WAIT_MS = 600_000;
 	private static readonly DEFAULT_POLL_MS = 200;
 	/** Enough to separate worktrees without making the filename unreadable. */
 	private static readonly ROOT_DIGEST_LENGTH = 12;

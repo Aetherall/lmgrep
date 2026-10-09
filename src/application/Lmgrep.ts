@@ -132,10 +132,14 @@ export class Lmgrep {
 	 * orphaned chunks from collection.
 	 */
 	async tidy(): Promise<TidyReport> {
-		await this.services.sweeper.sweep(this.services.location.root);
-		const deduped = await this.services.maintenance.dedupe();
-		const optimized = await this.services.maintenance.compact();
-		return { deduped, optimized };
+		// Under the write lock: dedupe deletes by row id, and a concurrent
+		// writer's compaction renumbers rows between its scan and its delete.
+		return this.services.builder.exclusively(async () => {
+			await this.services.sweeper.sweep(this.services.location.root);
+			const deduped = await this.services.maintenance.dedupe();
+			const optimized = await this.services.maintenance.compact();
+			return { deduped, optimized };
+		});
 	}
 
 	get maintenance(): IndexMaintenancePort {

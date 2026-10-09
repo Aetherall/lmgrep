@@ -61,6 +61,10 @@ export class LanceTables {
 		return this.db;
 	}
 
+	async checkoutLatest(): Promise<void> {
+		for (const table of this.open.values()) await table.checkoutLatest();
+	}
+
 	/** Open a table, or undefined when the database has never held it. */
 	async table(name: TableName): Promise<Table | undefined> {
 		const cached = this.open.get(name);

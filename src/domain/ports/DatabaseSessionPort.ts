@@ -7,4 +7,11 @@
  */
 export interface DatabaseSessionPort {
 	close(): void;
+	/**
+	 * Move every open table to its latest committed version. Reads otherwise
+	 * lag other processes' writes by up to the read consistency interval,
+	 * which a writer cannot afford: under the write lock it must see every
+	 * row already stored, or it stores them again.
+	 */
+	checkoutLatest(): Promise<void>;
 }

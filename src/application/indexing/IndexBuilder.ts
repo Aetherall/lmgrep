@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import type { LmgrepConfig } from "../../domain/config/LmgrepConfig.js";
 import type { Chunk } from "../../domain/corpus/Chunk.js";
 import type { ContentHash } from "../../domain/corpus/ContentHash.js";
@@ -12,6 +13,7 @@ import type {
 	ChunkRepositoryPort,
 	EmbeddedChunk,
 } from "../../domain/ports/ChunkRepositoryPort.js";
+import type { DatabaseSessionPort } from "../../domain/ports/DatabaseSessionPort.js";
 import type { EmbedderPort } from "../../domain/ports/EmbedderPort.js";
 import type { FileManifestRepositoryPort } from "../../domain/ports/FileManifestRepositoryPort.js";
 import type { IndexMaintenancePort } from "../../domain/ports/IndexMaintenancePort.js";
@@ -37,6 +39,8 @@ export interface IndexBuilderDependencies {
 	chunks: ChunkRepositoryPort;
 	manifest: FileManifestRepositoryPort;
 	maintenance: IndexMaintenancePort;
+	/** Brought up to date before each locked write. */
+	tables: DatabaseSessionPort;
 	bootstrapper: BranchBootstrapper;
 	sweeper: BranchManifestSweeper;
 	logger: LoggerPort;
@@ -74,27 +78,57 @@ export class IndexBuilder {
 	/** How often a long-lived builder prunes old versions and fragments. */
 	private static readonly PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 
+	/** Marks an async flow that already holds the write lock. */
+	private static readonly holdingWriteLock = new AsyncLocalStorage<boolean>();
+
 	private lastPrune: number | undefined;
 
 	constructor(private readonly deps: IndexBuilderDependencies) {}
 
 	/**
-	 * Held for the whole run: a watcher and an ad-hoc `lmgrep index` must not
-	 * write concurrently, or they race into duplicate chunk rows.
+	 * The write lock is taken only around writes, never around scanning,
+	 * chunking or embedding. Worktrees of one repository share a database, and
+	 * holding the lock for a whole run made every other worktree's watcher wait
+	 * out a minutes-long embed — long enough to time out and leave a new
+	 * branch unindexed. Duplicate rows, the reason for the lock, are prevented
+	 * by re-checking stored hashes inside each locked write.
+	 *
+	 * A reset holds it throughout: it drops the tables the rest of the run
+	 * rebuilds, and no other writer may land rows in between.
 	 */
 	async build(options: IndexBuildOptions = {}): Promise<IndexBuildResult> {
+		if (options.reset) return this.exclusively(() => this.run(options));
+		return this.run(options);
+	}
+
+	private async run(options: IndexBuildOptions): Promise<IndexBuildResult> {
+		const result = await this.buildSteps(options);
+		// Outside buildSteps on purpose. Sweeping is about branches that
+		// vanished from git, which has nothing to do with whether this run
+		// found anything to embed — and buildSteps returns early in five
+		// places, all of them reachable on a repo that never changes.
+		if (!options.dry) {
+			await this.exclusively(() =>
+				this.deps.sweeper.sweep(this.deps.location.root),
+			);
+			this.deps.registerIndex();
+			await this.pruneIfDue();
+		}
+		return result;
+	}
+
+	/**
+	 * Run `work` holding the write lock, with every table moved to its latest
+	 * version first so `work` sees all rows other writers stored. Runs
+	 * directly when this async flow already holds the lock; that is scoped to
+	 * the async context rather than a flag on the builder, so a concurrent
+	 * build in the same process still waits.
+	 */
+	exclusively<T>(work: () => Promise<T>): Promise<T> {
+		if (IndexBuilder.holdingWriteLock.getStore()) return work();
 		return this.deps.locks.withWriteLock(async () => {
-			const result = await this.buildLocked(options);
-			// Outside buildLocked on purpose. Sweeping is about branches that
-			// vanished from git, which has nothing to do with whether this run
-			// found anything to embed — and buildLocked returns early in five
-			// places, all of them reachable on a repo that never changes.
-			if (!options.dry) {
-				await this.deps.sweeper.sweep(this.deps.location.root);
-				this.deps.registerIndex();
-				await this.pruneIfDue();
-			}
-			return result;
+			await this.deps.tables.checkoutLatest();
+			return IndexBuilder.holdingWriteLock.run(true, work);
 		});
 	}
 
@@ -115,7 +149,9 @@ export class IndexBuilder {
 		}
 		this.lastPrune = now;
 		try {
-			const report = await this.deps.maintenance.prune();
+			const report = await this.exclusively(() =>
+				this.deps.maintenance.prune(),
+			);
 			for (const table of report.tables) {
 				if (table.oldVersionsRemoved === 0 && table.fragmentsRemoved === 0) {
 					continue;
@@ -133,7 +169,7 @@ export class IndexBuilder {
 		}
 	}
 
-	private async buildLocked(
+	private async buildSteps(
 		options: IndexBuildOptions,
 	): Promise<IndexBuildResult> {
 		const { logger } = this.deps;
@@ -141,9 +177,12 @@ export class IndexBuilder {
 
 		if (options.reset) {
 			logger.info("Resetting index...");
-			await this.deps.maintenance.reset();
-		} else {
-			await this.deps.bootstrapper.bootstrap(this.deps.location.root);
+			await this.exclusively(() => this.deps.maintenance.reset());
+		} else if ((await this.deps.manifest.current()).isEmpty) {
+			// Bootstrap re-checks emptiness itself, now under the lock.
+			await this.exclusively(() =>
+				this.deps.bootstrapper.bootstrap(this.deps.location.root),
+			);
 		}
 
 		const { files, complete } = this.selectFiles(options);
@@ -196,11 +235,11 @@ export class IndexBuilder {
 
 		// Drop the previous version's chunks before writing the new ones, or
 		// both versions would answer searches.
-		await this.deps.chunks.deleteByFiles(changedPaths);
+		await this.exclusively(() => this.deps.chunks.deleteByFiles(changedPaths));
 
 		const toEmbed = await this.selectChunksToEmbed(chunks, changedPaths);
 		if (toEmbed.length === 0) {
-			await this.commitFiles(changedPaths, current);
+			await this.exclusively(() => this.commitFiles(changedPaths, current));
 			logger.info("All chunks already indexed.");
 			return { succeeded: 0, failed: 0, removed };
 		}
@@ -295,8 +334,10 @@ export class IndexBuilder {
 		// Chunks first: the repository decides whether another branch still
 		// references the path and keeps them if so. Our manifest row goes
 		// either way.
-		await this.deps.chunks.deleteByFiles(paths);
-		await this.deps.manifest.deleteFiles(paths);
+		await this.exclusively(async () => {
+			await this.deps.chunks.deleteByFiles(paths);
+			await this.deps.manifest.deleteFiles(paths);
+		});
 		this.deps.logger.info(
 			`Removed ${paths.length} file(s) deleted from the working tree`,
 		);
@@ -322,7 +363,7 @@ export class IndexBuilder {
 		const fresh = changed.filter((f) => !known.has(f.hash.toString()));
 
 		if (alreadyIndexed.length > 0) {
-			await this.deps.manifest.upsert(alreadyIndexed);
+			await this.exclusively(() => this.deps.manifest.upsert(alreadyIndexed));
 			this.deps.logger.info(
 				`${alreadyIndexed.length} files already indexed (content known from other branches)`,
 			);
@@ -439,7 +480,18 @@ export class IndexBuilder {
 				chunk: chunks[it.index],
 				vector: it.vector,
 			}));
-			await this.deps.chunks.add(embedded);
+			await this.exclusively(async () => {
+				// Another writer may have stored the same content while this
+				// one was embedding outside the lock; adding it again would
+				// duplicate rows. Its file still counts as done either way.
+				const stored = await this.deps.chunks.existingHashes(
+					embedded.map((e) => e.chunk.hash),
+				);
+				await this.deps.chunks.add(
+					embedded.filter((e) => !stored.has(e.chunk.hash.toString())),
+				);
+				await this.commitCompletedFiles(embedded, outstanding, current);
+			});
 
 			succeeded += embedded.length;
 			stored += embedded.length;
@@ -449,8 +501,6 @@ export class IndexBuilder {
 				current: stored,
 				total: chunks.length,
 			});
-
-			await this.commitCompletedFiles(embedded, outstanding, current);
 		};
 
 		const pipeline = new EmbeddingPipeline(
@@ -486,12 +536,14 @@ export class IndexBuilder {
 			logger.error(err.message);
 		}
 
-		await this.commitUntouchedFiles(
-			changedPaths,
-			current,
-			chunks,
-			failedIndices,
-			outstanding,
+		await this.exclusively(() =>
+			this.commitUntouchedFiles(
+				changedPaths,
+				current,
+				chunks,
+				failedIndices,
+				outstanding,
+			),
 		);
 
 		this.report(aborted, succeeded, failedIndices.size, changedPaths.length);
@@ -596,9 +648,11 @@ export class IndexBuilder {
 	): Promise<void> {
 		if (succeeded === 0) return;
 		try {
-			const report = await this.deps.maintenance.optimize({
-				create: options.createIndex ?? false,
-			});
+			const report = await this.exclusively(() =>
+				this.deps.maintenance.optimize({
+					create: options.createIndex ?? false,
+				}),
+			);
 			for (const table of report.tables) {
 				if (table.action === "created") {
 					this.deps.logger.info(

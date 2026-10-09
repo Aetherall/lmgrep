@@ -152,6 +152,7 @@ export class LmgrepFactory {
 			chunks,
 			manifest,
 			maintenance,
+			tables,
 			bootstrapper: new BranchBootstrapper(manifest, git, logger),
 			sweeper,
 			logger,
