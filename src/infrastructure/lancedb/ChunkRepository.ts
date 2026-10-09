@@ -2,6 +2,7 @@ import { Chunk } from "../../domain/corpus/Chunk.js";
 import { CodeLocation } from "../../domain/corpus/CodeLocation.js";
 import { ContentHash } from "../../domain/corpus/ContentHash.js";
 import { FileVersion } from "../../domain/corpus/FileVersion.js";
+import type { FileManifest } from "../../domain/corpus/SourceFile.js";
 import type { Vector } from "../../domain/corpus/Vector.js";
 import type {
 	ChunkQuery,
@@ -40,6 +41,40 @@ interface ChunkRow extends Record<string, unknown> {
  * them with the manifest of file versions the branch actually references.
  */
 export class ChunkRepository implements ChunkRepositoryPort {
+	/**
+	 * Ceiling on how far a search widens to fill its page. Without it, a
+	 * branch matching few rows widened until it had read the whole table —
+	 * every row's content, measured at 2.8GB and 7s on a 92k-chunk index.
+	 */
+	private static readonly MAX_FETCH_ROWS = 1000;
+
+	/** Built once per manifest: a large branch has thousands of versions. */
+	private static readonly versionPredicates = new WeakMap<
+		FileManifest,
+		string
+	>();
+
+	/**
+	 * Restrict a search to the file versions a branch references, so LanceDB
+	 * returns in-scope rows instead of the nearest rows of every branch.
+	 * Matching on content hash alone is a superset of the exact (path, hash)
+	 * check, which still runs on the results; rows without a recorded version
+	 * predate versioning and match anything.
+	 */
+	private static versionPredicate(versions: FileManifest): string {
+		let predicate = ChunkRepository.versionPredicates.get(versions);
+		if (!predicate) {
+			const hashes = new Set<string>();
+			for (const [, hash] of versions) hashes.add(hash.toString());
+			const list = [...hashes]
+				.map((hash) => `'${LanceTables.quote(hash)}'`)
+				.join(", ");
+			predicate = `fileHash IN (${list}) OR fileHash = '' OR fileHash IS NULL`;
+			ChunkRepository.versionPredicates.set(versions, predicate);
+		}
+		return predicate;
+	}
+
 	constructor(
 		private readonly tables: LanceTables,
 		private readonly manifest: FileManifestRepositoryPort,
@@ -67,13 +102,27 @@ export class ChunkRepository implements ChunkRepositoryPort {
 		const versions = query.scopeToBranch
 			? await this.manifest.branchVersions()
 			: undefined;
+		// A branch that references no file version can match nothing.
+		if (versions?.isEmpty) return HitList.of([]);
 
 		// Over-fetch: branch/version filtering and dedup both discard rows, so
 		// pull extra to still return `limit` distinct results.
 		let fetchLimit = versions ? query.limit * 3 : query.limit * 2;
-		const predicate = this.buildPredicate(query);
+		const filters = this.buildPredicate(query);
+		// The version predicate is only added once an unrestricted query comes
+		// back short: it is exact enough to fill the page in one more query, but
+		// matching thousands of versions costs every search that would not have
+		// needed it.
+		let restricted = false;
 
 		while (true) {
+			const predicate = [
+				filters,
+				restricted && versions && ChunkRepository.versionPredicate(versions),
+			]
+				.filter(Boolean)
+				.map((condition) => `(${condition})`)
+				.join(" AND ");
 			let builder = table
 				.query()
 				.nearestTo(query.vector.toArray())
@@ -96,7 +145,14 @@ export class ChunkRepository implements ChunkRepositoryPort {
 			if (hits.length >= query.limit || rows.length < fetchLimit) {
 				return hits.takeAtMost(query.limit);
 			}
-			fetchLimit *= 2;
+			if (versions && !restricted) {
+				restricted = true;
+				continue;
+			}
+			if (fetchLimit >= ChunkRepository.MAX_FETCH_ROWS) {
+				return hits.takeAtMost(query.limit);
+			}
+			fetchLimit = Math.min(fetchLimit * 2, ChunkRepository.MAX_FETCH_ROWS);
 		}
 	}
 

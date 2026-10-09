@@ -13,7 +13,10 @@ const core = await LmgrepCore.open({
 	database: process.env.LMGREP_DATABASE || undefined,
 });
 
+let shuttingDown = false;
 const shutdown = (): void => {
+	if (shuttingDown) return;
+	shuttingDown = true;
 	core.dispose().finally(() => process.exit(0));
 };
 process.on("exit", () => {
@@ -21,5 +24,11 @@ process.on("exit", () => {
 });
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
+
+// A client that crashes or is killed sends no signal; its end of stdin just
+// closes. The watcher keeps the event loop alive, so without these the server
+// outlives every client that ever started it.
+process.stdin.on("end", shutdown);
+process.stdin.on("close", shutdown);
 
 await new LmgrepMcpServer(core).serve();

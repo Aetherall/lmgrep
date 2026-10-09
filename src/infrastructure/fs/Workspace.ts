@@ -1,4 +1,12 @@
-import { readFileSync, statSync, watch } from "node:fs";
+import {
+	type Dirent,
+	type FSWatcher,
+	lstatSync,
+	readdirSync,
+	readFileSync,
+	statSync,
+	watch,
+} from "node:fs";
 import { join } from "node:path";
 import { globSync } from "glob";
 import { ContentHash } from "../../domain/corpus/ContentHash.js";
@@ -73,9 +81,15 @@ export class Workspace implements WorkspacePort {
 	/**
 	 * Watch for changes, coalescing a burst into one callback.
 	 *
-	 * fs.watch's recursive mode misses events on Linux (new subdirectories,
-	 * editor atomic saves); callers pair this with a periodic reconcile rather
-	 * than trusting it alone.
+	 * One non-recursive watcher per directory the ignore rules admit, added as
+	 * directories appear. `fs.watch`'s recursive mode cannot be used: on Linux
+	 * Node emulates it with a watcher for every file and directory in the tree,
+	 * ignored or not, and on a repository with `node_modules` that measured
+	 * 123k watchers holding ~200MB of heap for a 349-file project.
+	 *
+	 * Events can still be missed (editor atomic saves, bursts, files created in
+	 * a new directory before its watcher exists), so callers pair this with a
+	 * periodic reconcile rather than trusting it alone.
 	 */
 	watch(
 		cwd: string,
@@ -85,27 +99,75 @@ export class Workspace implements WorkspacePort {
 		extensions?: ExtensionRules,
 	): WatchHandle {
 		const rules = new IndexableFileRules(cwd, extraIgnore, extensions);
+		const watchers = new Map<string, FSWatcher>();
 		let timer: ReturnType<typeof setTimeout> | undefined;
 		let pending = new Set<string>();
 
-		const watcher = watch(cwd, { recursive: true }, (_event, filename) => {
-			if (!filename) return;
-			if (!rules.hasIndexableExtension(filename)) return;
-			if (rules.isIgnored(filename)) return;
+		const unwatch = (dir: string): void => {
+			for (const [path, watcher] of watchers) {
+				if (path === dir || path.startsWith(`${dir}/`)) {
+					watcher.close();
+					watchers.delete(path);
+				}
+			}
+		};
 
-			pending.add(filename);
+		const watchTree = (dir: string): void => {
+			if (watchers.has(dir)) return;
+			let watcher: FSWatcher;
+			try {
+				watcher = watch(join(cwd, dir), (_event, name) => {
+					if (name) changed(dir ? `${dir}/${name}` : name);
+				});
+			} catch {
+				return;
+			}
+			watcher.on("error", () => unwatch(dir));
+			watchers.set(dir, watcher);
+
+			let entries: Dirent[];
+			try {
+				entries = readdirSync(join(cwd, dir), { withFileTypes: true });
+			} catch {
+				return;
+			}
+			for (const entry of entries) {
+				if (!entry.isDirectory()) continue;
+				const child = dir ? `${dir}/${entry.name}` : entry.name;
+				if (!rules.isIgnored(`${child}/`)) watchTree(child);
+			}
+		};
+
+		const changed = (path: string): void => {
+			let isDirectory: boolean | undefined;
+			try {
+				isDirectory = lstatSync(join(cwd, path)).isDirectory();
+			} catch {
+				unwatch(path);
+			}
+			if (isDirectory) {
+				if (!rules.isIgnored(`${path}/`)) watchTree(path);
+				return;
+			}
+			if (!rules.hasIndexableExtension(path)) return;
+			if (rules.isIgnored(path)) return;
+
+			pending.add(path);
 			if (timer) clearTimeout(timer);
 			timer = setTimeout(() => {
 				const files = [...pending];
 				pending = new Set();
 				onChanges(files);
 			}, debounceMs);
-		});
+		};
+
+		watchTree("");
 
 		return {
 			close() {
 				if (timer) clearTimeout(timer);
-				watcher.close();
+				for (const watcher of watchers.values()) watcher.close();
+				watchers.clear();
 			},
 		};
 	}

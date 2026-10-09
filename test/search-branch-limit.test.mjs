@@ -98,3 +98,37 @@ test("an exhausted branch with no matching versions returns an empty page", asyn
 	const chunks = await repository(t, staleRows());
 	assert.equal((await chunks.search(query(2))).length, 0);
 });
+
+test("rows without a recorded file version still match scoped searches", async (t) => {
+	const chunks = await repository(t, [...staleRows(), row("legacy", "", 40)]);
+	assert.deepEqual(
+		(await chunks.search(query(1))).toArray().map((hit) => hit.id),
+		["legacy"],
+	);
+});
+
+test("a branch that references no files returns no hits", async (t) => {
+	const root = mkdtempSync(join(tmpdir(), "lmgrep-search-limit-"));
+	const branch = Branch.of("unindexed");
+	const tables = new LanceTables(root, branch);
+	t.after(() => {
+		tables.close();
+		rmSync(root, { recursive: true, force: true });
+	});
+	await new FileManifestRepository(tables, Branch.of("main")).upsert([
+		{ path: "source.ts", hash: ContentHash.fromStored("current") },
+	]);
+	await tables.tableOrCreate(TableName.Chunks, [
+		row("main-only", "current", 0),
+	]);
+	const chunks = new ChunkRepository(
+		tables,
+		new FileManifestRepository(tables, branch),
+		branch,
+	);
+	assert.equal((await chunks.search(query(5))).length, 0);
+	assert.equal(
+		(await chunks.search(query(5, { scopeToBranch: false }))).length,
+		1,
+	);
+});
