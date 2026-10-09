@@ -21,10 +21,12 @@ interface FileRow extends Record<string, unknown> {
  *
  * The current branch's manifest is cached because every search consults it to
  * scope results, and re-reading it per query would dominate search latency.
- * Anything that writes the manifest must {@link invalidate}.
+ * The cache is keyed by table version, so writes from another process (the
+ * watcher, when this is a reader) invalidate it too; writes from this one
+ * must still call {@link invalidate}.
  */
 export class FileManifestRepository implements FileManifestRepositoryPort {
-	private cached: FileManifest | undefined;
+	private cached: { version: number; manifest: FileManifest } | undefined;
 
 	constructor(
 		private readonly tables: LanceTables,
@@ -50,11 +52,13 @@ export class FileManifestRepository implements FileManifestRepositoryPort {
 	}
 
 	async branchVersions(): Promise<FileManifest | undefined> {
-		if (this.cached) return this.cached;
 		const table = await this.tables.table(TableName.Files);
 		if (!table) return undefined;
-		this.cached = await this.current();
-		return this.cached;
+		const version = await table.version();
+		if (this.cached?.version !== version) {
+			this.cached = { version, manifest: await this.current() };
+		}
+		return this.cached.manifest;
 	}
 
 	invalidate(): void {

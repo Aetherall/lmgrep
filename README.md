@@ -114,6 +114,9 @@ Two of these are the product; the rest you run once.
 There is no `repair`, `compact`, or `migrate`. Reconciling the manifest,
 dropping duplicate rows, compacting fragments and training the vector index all
 happen inside `lmgrep index`, which is the one moment you are already waiting.
+Compaction and deleting superseded versions older than an hour also run at most
+hourly in whichever `lmgrep serve` or `lmgrep mcp` process is watching, so a
+long-watched index does not grow with every edit.
 Cleanup scans scalar identifiers and deletes only unwanted row IDs in place; it
 does not load all embedding vectors into JavaScript or drop the chunks table.
 `prune` became `lmgrep projects rm`, which can see what it is deleting.

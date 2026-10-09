@@ -35,6 +35,15 @@ export class LanceTables {
 	 */
 	static readonly FILTER_BATCH_SIZE = 50;
 
+	/**
+	 * How stale a read may be before LanceDB reloads the table from disk.
+	 * LanceDB's default never reloads, so a process that does not write — an
+	 * MCP server without the watch lock, which is every server but one per
+	 * project — kept searching the index as of its startup for its whole life,
+	 * and failed once pruning deleted that version.
+	 */
+	static readonly READ_CONSISTENCY_SECONDS = 5;
+
 	private db: Connection | undefined;
 	private readonly open = new Map<TableName, Table>();
 
@@ -46,7 +55,9 @@ export class LanceTables {
 	private async connection(): Promise<Connection> {
 		if (this.db) return this.db;
 		mkdirSync(this.path, { recursive: true });
-		this.db = await connect(this.path);
+		this.db = await connect(this.path, {
+			readConsistencyInterval: LanceTables.READ_CONSISTENCY_SECONDS,
+		});
 		return this.db;
 	}
 

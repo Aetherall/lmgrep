@@ -71,6 +71,10 @@ export interface IndexBuilderDependencies {
 export class IndexBuilder {
 	/** Enough files in flight to keep a worker pool busy, few enough to stay small. */
 	private static readonly CHUNK_CONCURRENCY = 32;
+	/** How often a long-lived builder prunes old versions and fragments. */
+	private static readonly PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+
+	private lastPrune: number | undefined;
 
 	constructor(private readonly deps: IndexBuilderDependencies) {}
 
@@ -88,9 +92,45 @@ export class IndexBuilder {
 			if (!options.dry) {
 				await this.deps.sweeper.sweep(this.deps.location.root);
 				this.deps.registerIndex();
+				await this.pruneIfDue();
 			}
 			return result;
 		});
+	}
+
+	/**
+	 * Every write leaves a version and fragments behind, and the vector-index
+	 * optimize only runs once its tail grows, so on its own nothing ever
+	 * reclaimed them. Runs regardless of whether this build changed anything,
+	 * so an index that already accumulated a backlog is cleaned on the next
+	 * run. Never fatal: an unpruned index is large, not wrong.
+	 */
+	private async pruneIfDue(): Promise<void> {
+		const now = Date.now();
+		if (
+			this.lastPrune !== undefined &&
+			now - this.lastPrune < IndexBuilder.PRUNE_INTERVAL_MS
+		) {
+			return;
+		}
+		this.lastPrune = now;
+		try {
+			const report = await this.deps.maintenance.prune();
+			for (const table of report.tables) {
+				if (table.oldVersionsRemoved === 0 && table.fragmentsRemoved === 0) {
+					continue;
+				}
+				this.deps.logger.info(
+					`Pruned ${table.table}: ${table.oldVersionsRemoved} old versions, ` +
+						`${table.fragmentsRemoved} fragments compacted, ` +
+						`${Math.round(table.bytesRemoved / 1048576)} MB reclaimed`,
+				);
+			}
+		} catch (err) {
+			this.deps.logger.error(
+				`Index pruning skipped: ${err instanceof Error ? err.message : err}`,
+			);
+		}
 	}
 
 	private async buildLocked(

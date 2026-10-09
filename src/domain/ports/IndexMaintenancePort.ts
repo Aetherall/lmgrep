@@ -44,6 +44,18 @@ export interface OptimizeOptions {
 	create?: boolean;
 }
 
+/** What pruning reclaimed from one table. */
+export interface TablePruneReport {
+	table: string;
+	oldVersionsRemoved: number;
+	bytesRemoved: number;
+	fragmentsRemoved: number;
+}
+
+export interface PruneReport {
+	tables: TablePruneReport[];
+}
+
 /** Whether searches are answered by a vector index or a brute-force scan. */
 export interface VectorIndexState {
 	rows: number;
@@ -60,6 +72,12 @@ export interface IndexMaintenancePort {
 	optimize(options?: OptimizeOptions): Promise<OptimizeReport>;
 	/** Full unconditional pass, including the non-vector tables. */
 	compact(): Promise<OptimizeReport>;
+	/**
+	 * Compact every table and delete versions old enough that no reader can
+	 * still be on them. Every write leaves a version and a fragment behind;
+	 * without this they accumulate for the life of the index.
+	 */
+	prune(): Promise<PruneReport>;
 	/** Drop duplicate and stale-version rows, rewriting the table. */
 	dedupe(): Promise<DedupeReport>;
 	/** Delete every table — a full rebuild from scratch. */

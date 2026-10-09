@@ -5,6 +5,7 @@ import type {
 	IndexMaintenancePort,
 	OptimizeOptions,
 	OptimizeReport,
+	PruneReport,
 	TableOptimizeReport,
 	VectorIndexState,
 } from "../../domain/ports/IndexMaintenancePort.js";
@@ -26,10 +27,44 @@ export class IndexMaintenance implements IndexMaintenancePort {
 	/** Tables holding embeddings, and therefore wanting a vector index. */
 	private static readonly VECTOR_TABLES = [TableName.Chunks] as const;
 
+	/**
+	 * How long a superseded version is kept before pruning deletes its files.
+	 * A reader in another process stays on the version it last loaded until
+	 * its next consistency check ({@link LanceTables.READ_CONSISTENCY_SECONDS}),
+	 * and fails outright if that version's files are gone, so this must be far
+	 * longer than that interval. LanceDB's own default is 7 days, which on a
+	 * watched repository kept thousands of versions: 1.5GB for 1.7k rows.
+	 */
+	private static readonly RETAIN_VERSIONS_MS = 60 * 60 * 1000;
+
 	constructor(
 		private readonly tables: LanceTables,
 		private readonly manifest: FileManifestRepositoryPort,
 	) {}
+
+	async prune(): Promise<PruneReport> {
+		const report: PruneReport = { tables: [] };
+		for (const name of [TableName.Chunks, TableName.Files]) {
+			const table = await this.tables.table(name);
+			if (!table) continue;
+			const stats = await table.optimize(IndexMaintenance.cleanup());
+			report.tables.push({
+				table: name,
+				oldVersionsRemoved: stats.prune.oldVersionsRemoved,
+				bytesRemoved: stats.prune.bytesRemoved,
+				fragmentsRemoved: stats.compaction.fragmentsRemoved,
+			});
+		}
+		return report;
+	}
+
+	private static cleanup(): { cleanupOlderThan: Date } {
+		return {
+			cleanupOlderThan: new Date(
+				Date.now() - IndexMaintenance.RETAIN_VERSIONS_MS,
+			),
+		};
+	}
 
 	/**
 	 * Cheap and idempotent when there is nothing to do, so it is safe to call
@@ -62,7 +97,7 @@ export class IndexMaintenance implements IndexMaintenancePort {
 		await this.dropLegacyTables(report);
 		const files = await this.tables.table(TableName.Files);
 		if (files) {
-			await files.optimize();
+			await files.optimize(IndexMaintenance.cleanup());
 			report.tables.push({
 				table: TableName.Files,
 				rows: await files.countRows(),
@@ -125,7 +160,7 @@ export class IndexMaintenance implements IndexMaintenancePort {
 				}),
 				replace: true,
 			});
-			await table.optimize();
+			await table.optimize(IndexMaintenance.cleanup());
 			return { table: name, rows, action: "created" };
 		}
 
@@ -143,7 +178,7 @@ export class IndexMaintenance implements IndexMaintenancePort {
 
 		// optimize() both compacts fragments and folds the unindexed tail into
 		// the existing index — no retraining from scratch.
-		await table.optimize();
+		await table.optimize(IndexMaintenance.cleanup());
 		return { table: name, rows, action: "optimized", unindexed };
 	}
 
